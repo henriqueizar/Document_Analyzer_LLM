@@ -1,0 +1,13 @@
+Utilizei PostgreSQL em container Docker para 
+simular um ambiente próximo de produção, 
+ao invés de usar SQLite puro, o que poderia
+gerar empecilhos futuramente.
+
+Problema contornado: o Prisma havia gerado
+URL "prisma+postgres' automaticamente, que 
+não é compatível com Postgres Docker. 
+Foi um problema simples, mas que me demandou
+tempo na investigação, até entender o que 
+estava ocorrendo de errado. Entao mudei
+ para uma URL PostgreSQL padrão 
+para garantir a funcionalidade.
