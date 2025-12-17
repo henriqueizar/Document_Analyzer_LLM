@@ -21,14 +21,22 @@ model User {
   createdAt DateTime   @default(now())
 }
 
+enum DocumentStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
 model Document {
   id            String           @id @default(uuid())
   userId        String
   user          User             @relation(fields: [userId], references: [id])
+  originalName  String
   filename      String
   filePath      String
   extractedText String?
-  status        String           @default("pending")
+  status        DocumentStatus   @default(PENDING)
   interactions  LlmInteraction[]
   createdAt     DateTime         @default(now())
 }
