@@ -3,6 +3,7 @@ import {
   Post,
   UploadedFile,
   UseInterceptors,
+  Param
 } from '@nestjs/common';
 
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -15,7 +16,7 @@ import { DocumentsService } from './documents.service';
 export class DocumentsController {
 
   constructor(
-    private readonly documentsService: DocumentsService, // 👈 AQUI
+    private readonly documentsService: DocumentsService, 
   ) {}
 
 
@@ -35,5 +36,11 @@ export class DocumentsController {
   upload(@UploadedFile() file: Express.Multer.File) {
     const userId = 'test-user'; // temporario, dps vem o auth
     return this.documentsService.create(userId, file);
+  }
+
+  @Post(':id/process')
+async process(@Param('id') id: string) {
+  this.documentsService.process(id); // sem await
+  return { message: 'Processing started' };
   }
 }

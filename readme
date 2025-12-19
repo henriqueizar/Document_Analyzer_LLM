@@ -11,3 +11,22 @@ tempo na investigação, até entender o que
 estava ocorrendo de errado. Entao mudei
  para uma URL PostgreSQL padrão 
 para garantir a funcionalidade.
+
+PDFs escaneados exigem conversao 
+para imagem antes do OCR.
+
+Como o OCR oscila em termos de tempo de processamento, 
+sendo um tanto imprevisível, o processamento teve de ser
+feito de forma assincrona, para o cliente consultar o 
+resultado somente depois de todo o OCR, evitando assim
+um timeout e travamento, como estava sendo observado
+antes dessa mudança, com "Error: write EOF" indicando
+o fechamento da conexão.
+
+### PDF OCR
+
+Although the case requires OCR for invoice images, the system was designed to also support PDF OCR.
+
+However, PDF OCR requires native image processing binaries (GraphicsMagick/ImageMagick).
+The current implementation supports PDF-to-image conversion and OCR, but on environments without these binaries, the process fails, marking the document as FAILED without crashing the system.
+Image OCR works gracefully.
