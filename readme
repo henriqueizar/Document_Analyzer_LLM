@@ -30,3 +30,8 @@ Although the case requires OCR for invoice images, the system was designed to al
 However, PDF OCR requires native image processing binaries (GraphicsMagick/ImageMagick).
 The current implementation supports PDF-to-image conversion and OCR, but on environments without these binaries, the process fails, marking the document as FAILED without crashing the system.
 Image OCR works gracefully.
+
+### LLM Interaction (OPENAI API)
+
+The LLM integration is fully implemented..
+Due to OpenAI quota limitations during development, a simulated response mode was implemented, ensuring the feature remains testable and ready for use.
