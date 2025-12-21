@@ -44,7 +44,8 @@ model LlmInteraction {
   id         String   @id @default(uuid())
   documentId String
   document   Document @relation(fields: [documentId], references: [id])
+  question   String
+  answer     String
   role       String
-  content    String
   createdAt  DateTime @default(now())
 }

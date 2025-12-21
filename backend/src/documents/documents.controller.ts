@@ -3,7 +3,8 @@ import {
   Post,
   UploadedFile,
   UseInterceptors,
-  Param
+  Param,
+  Body
 } from '@nestjs/common';
 
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -39,8 +40,17 @@ export class DocumentsController {
   }
 
   @Post(':id/process')
-async process(@Param('id') id: string) {
-  this.documentsService.process(id); // sem await
-  return { message: 'Processing started' };
+  async process(@Param('id') id: string) {
+    this.documentsService.process(id); // sem await
+    return { message: 'Processing started' };
+    }
+
+  @Post(':id/ask')
+  async ask(
+    @Param('id') id: string,
+    @Body('question') question: string,
+  ) {
+    return this.documentsService.ask(id, question);
   }
+
 }
