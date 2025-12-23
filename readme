@@ -57,3 +57,11 @@ And to ensure the application remains fully testable without paid API credits, t
 
 - If no API key is provided, return a simulated explanation
 - If quota is exceeded, return and store a controlled error message is stored 
+
+### Authentication via OAuth
+Authentication is handled on the frontend using NextAuth (Google OAuth).
+The backend receives the authenticated user identifier via a custom HTTP header (user-id) for simplicity.
+
+During the integration between the frontend authentication and the backend, a foreign key issue was identified when creating documents from authenticated users.
+
+To manage this, the backend implements an upsert operation when handling document uploads. This ensures that the user is automatically created on their first interaction with the system, and reused on subsequent requests.
