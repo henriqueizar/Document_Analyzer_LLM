@@ -23,15 +23,45 @@ um timeout e travamento, como estava sendo observado
 antes dessa mudança, com "Error: write EOF" indicando
 o fechamento da conexão.
 
+### Processing Flow 
+
+1. User uploads a document
+2. Document is stored and marked as PENDING
+3. OCR processing extracts text
+4. Document status is updated to COMPLETED
+5. User can ask questions about the extracted text
+6. Each interaction is stored for historical tracking
+
+### OCR
+
+-  Image OCR is fully supported using Tesseract.js
+- PDF OCR is implemented through pdf2pic conversion, and then Image OCR
+- On Windows, PDF OCR requires ImageMagick/GraphicsMagick
+- The PDF OCR pipeline is fully compatible with Linux environments
+
 ### PDF OCR
 
 Although the case requires OCR for invoice images, the system was designed to also support PDF OCR.
 
 However, PDF OCR requires native image processing binaries (GraphicsMagick/ImageMagick).
+
 The current implementation supports PDF-to-image conversion and OCR, but on environments without these binaries, the process fails, marking the document as FAILED without crashing the system.
 Image OCR works gracefully.
 
 ### LLM Interaction (OPENAI API)
 
 The LLM integration is fully implemented..
-Due to OpenAI quota limitations during development, a simulated response mode was implemented, ensuring the feature remains testable and ready for use.
+Due to OpenAI quota limitations, a simulated response was implemented, ensuring the feature remains testable and ready for use.
+
+And to ensure the application remains fully testable without paid API credits, the system includes graceful fallback behavior:
+
+- If no API key is provided, return a simulated explanation
+- If quota is exceeded, return and store a controlled error message is stored 
+
+### Authentication via OAuth
+Authentication is handled on the frontend using NextAuth (Google OAuth).
+The backend receives the authenticated user identifier via a custom HTTP header (user-id) for simplicity.
+
+During the integration between the frontend authentication and the backend, a foreign key issue was identified when creating documents from authenticated users.
+
+To manage this, the backend implements an upsert operation when handling document uploads. This ensures that the user is automatically created on their first interaction with the system, and reused on subsequent requests.

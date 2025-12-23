@@ -4,7 +4,8 @@ import {
   UploadedFile,
   UseInterceptors,
   Param,
-  Body
+  Body,
+  Headers
 } from '@nestjs/common';
 
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -34,14 +35,16 @@ export class DocumentsController {
       }),
     }),
   )
-  upload(@UploadedFile() file: Express.Multer.File) {
-    const userId = 'test-user'; // temporario, dps vem o auth
-    return this.documentsService.create(userId, file);
+  upload(
+    @UploadedFile() file: Express.Multer.File,
+    @Headers('user-id') userEmail: string
+  ) {
+    return this.documentsService.create(userEmail, file);
   }
 
   @Post(':id/process')
   async process(@Param('id') id: string) {
-    this.documentsService.process(id); // sem await
+    this.documentsService.process(id); // no await
     return { message: 'Processing started' };
     }
 

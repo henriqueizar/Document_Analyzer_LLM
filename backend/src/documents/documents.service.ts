@@ -11,10 +11,21 @@ export class DocumentsService {
     private ocrService: OcrService,
     private llmService: LlmService) {}
 
-  async create(userId: string, file: Express.Multer.File) {
+  async create(userEmail: string, file: Express.Multer.File) {
+    console.log('EMAIL RECEBIDO:', userEmail);
+    const user = await this.prisma.user.upsert({
+      where: { email: userEmail },
+      update: {},
+      create:{
+        email: userEmail,
+      }
+    });
+    console.log('USER ENCONTRADO:', user);
+
+    
     return this.prisma.document.create({
       data: {
-        userId,
+        userId: user.id,
         filename: file.filename,
         originalName: file.originalname, 
         filePath: file.path,
