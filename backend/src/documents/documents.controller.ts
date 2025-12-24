@@ -5,7 +5,8 @@ import {
   UseInterceptors,
   Param,
   Body,
-  Headers
+  Headers,
+  Get,
 } from '@nestjs/common';
 
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -60,4 +61,10 @@ export class DocumentsController {
     return this.documentsService.ask(id, question);
   }
 
+
+@Get(':id')
+async findOne(@Param('id') id: string) {
+  console.log('GET DOCUMENT:', id);
+  return this.documentsService.findOne(id);
+}
 }

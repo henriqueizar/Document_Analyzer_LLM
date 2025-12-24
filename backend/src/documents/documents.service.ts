@@ -40,7 +40,7 @@ async process(documentId: string) {
     const document = await this.prisma.document.findUnique({
       where: { id: documentId },
     });
-    
+
     if (!document) {
       throw new Error('Document not found');
     }
@@ -123,5 +123,23 @@ async ask(documentId: string, question: string) {
     },
   });
 }
+async findOne(documentId: string) {
+  const document = await this.prisma.document.findUnique({
+    where: { id: documentId },
+  });
 
+  if (!document) {
+    throw new Error('Document not found');
+  }
+
+  const interactions = await this.prisma.llmInteraction.findMany({
+    where: { documentId },
+    orderBy: { createdAt: 'asc' },
+  });
+
+  return {
+    document,
+    interactions,
+  };
+}
 }
