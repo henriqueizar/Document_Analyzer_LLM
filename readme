@@ -20,20 +20,23 @@ This README was written with the help of ChatGPT and manually reviewed and adapt
 - git clone https://github.com/henriqueizar/Document_Analyzer_LLM
 
 2. Environment variables
-- Backend (backend/.env)
-- - DATABASE_URL = postgresql://postgres:postgres@localhost:5432/paggo
-- - OPENAI_API_KEY = your_openai_api_key
+- Backend (backend/.env) --> [create .env file]
+DATABASE_URL = postgresql://postgres:postgres@localhost:5432/paggo
+OPENAI_API_KEY = your_openai_api_key
 
 NOTE: If OPENAI_API_KEY is not set, the system uses simulated LLM responses.
 
-- Frontend (frontend/.env.local)
-- - NEXTAUTH_URL=http://localhost:3001
-- - NEXTAUTH_SECRET=your_secret_here
+- Frontend (frontend/.env)--> [create .env file]
+NEXTAUTH_URL=http://localhost:3001
+NEXTAUTH_SECRET=secret_here
 
-- - GOOGLE_CLIENT_ID= "964289768222-47ert0q6pfh6tcou4ba9hjb6e3fqej73.apps.googleusercontent.com"
-- - GOOGLE_CLIENT_SECRET=your_secret_here
+GOOGLE_CLIENT_ID= "964289768222-47ert0q6pfh6tcou4ba9hjb6e3fqej73.apps.googleusercontent.com"
+GOOGLE_CLIENT_SECRET=secret_here
 
 3. Start PostgreSQL
+- Open Docker Desktop
+On terminal:
+- cd backend
 - docker compose up -d
 
 4. Backend setup
@@ -77,6 +80,7 @@ Access previous documents and chat history
 
 - - The backend is not suitable for serverless environments.
 
+## Development details
 
 ### Architecture
 
@@ -164,6 +168,15 @@ This approach prevents issues previously observed, such as request blocking and 
 
 Due to OCR and LLM processing being CPU-intensive and long-running, the backend is not suitable for serverless environments such as Vercel Functions.
 
+## Future Improvements
+
+- Improve frontend visual design and overall user experience.
+
+- Add real-time processing status updates during OCR execution.
+
+- Move OCR and LLM processing to a background job queue.
+
+- Support additional document formats and improve OCR post-processing quality.
 For evaluation purposes, the application runs fully in a local environment.
 
 
