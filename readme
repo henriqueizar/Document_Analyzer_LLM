@@ -1,80 +1,170 @@
-## Architecture
+This README was written with the help of ChatGPT and manually reviewed and adapted.
+
+# DOCUMENT LLM ANALYZER
+
+## Running the project locally
+
+### Prerequisites
+
+- Node.js (v18+)
+
+- Docker and Docker Compose
+
+- Git
+
+- (Optional) ImageMagick or GraphicsMagick for PDF OCR on Windows
+
+### How to run
+
+1. Clone the repository
+- git clone https://github.com/henriqueizar/Document_Analyzer_LLM
+
+2. Environment variables
+- Backend (backend/.env)
+- - DATABASE_URL = postgresql://postgres:postgres@localhost:5432/paggo
+- - OPENAI_API_KEY = your_openai_api_key
+
+NOTE: If OPENAI_API_KEY is not set, the system uses simulated LLM responses.
+
+- Frontend (frontend/.env.local)
+- - NEXTAUTH_URL=http://localhost:3001
+- - NEXTAUTH_SECRET=your_secret_here
+
+- - GOOGLE_CLIENT_ID= "964289768222-47ert0q6pfh6tcou4ba9hjb6e3fqej73.apps.googleusercontent.com"
+- - GOOGLE_CLIENT_SECRET=your_secret_here
+
+3. Start PostgreSQL
+- docker compose up -d
+
+4. Backend setup
+- cd backend
+- npm install
+- npx prisma migrate dev
+- npm run start:dev
+
+
+Backend runs on http://localhost:3000
+
+5. Frontend setup
+- cd frontend
+- npm install
+- npm run dev
+
+
+Frontend runs on http://localhost:3001
+
+6. Usage
+
+Open http://localhost:3001
+
+Sign in with Google
+
+Upload a document (image or PDF)
+
+Wait for OCR and automatic explanation
+
+Ask questions about the document
+
+Access previous documents and chat history
+
+- Notes
+
+- - Image OCR works out of the box.
+
+- - PDF OCR on Windows requires ImageMagick or GraphicsMagick.
+
+- - OCR and LLM processing are asynchronous to avoid timeouts.
+
+- - The backend is not suitable for serverless environments.
+
+
+### Architecture
 
 The application is split into two independent services:
 
-- Frontend: Next.js application responsible for authentication (Google OAuth), file upload UI, and document visualization.
-- Backend: NestJS API responsible for OCR processing, LLM interaction, and data persistence.
+Frontend: Next.js application responsible for authentication (Google OAuth), file upload UI, document visualization and chat-like interaction.
+
+Backend: NestJS API responsible for OCR processing, LLM interaction and data persistence.
 
 During local development, the services run on different ports:
 
-- Frontend: http://localhost:3000
-- Backend: http://localhost:3001
+Frontend: http://localhost:3000
 
-Utilizei PostgreSQL em container Docker para 
-simular um ambiente próximo de produção, 
-ao invés de usar SQLite puro, o que poderia
-gerar empecilhos futuramente.
+Backend: http://localhost:3001
 
-Problema contornado: o Prisma havia gerado
-URL "prisma+postgres' automaticamente, que 
-não é compatível com Postgres Docker. 
-Foi um problema simples, mas que me demandou
-tempo na investigação, até entender o que 
-estava ocorrendo de errado. Entao mudei
- para uma URL PostgreSQL padrão 
-para garantir a funcionalidade.
+PostgreSQL is used inside a Docker container to simulate an environment closer to production. SQLite was intentionally avoided to prevent future migration issues and behavioral differences.
 
-PDFs escaneados exigem conversao 
-para imagem antes do OCR.
+During setup, Prisma automatically generated a prisma+postgres connection URL, which is not compatible with PostgreSQL running in Docker. This caused connection failures until identified. The solution was to switch to a standard PostgreSQL connection string.
 
-Como o OCR oscila em termos de tempo de processamento, 
-sendo um tanto imprevisível, o processamento teve de ser
-feito de forma assincrona, para o cliente consultar o 
-resultado somente depois de todo o OCR, evitando assim
-um timeout e travamento, como estava sendo observado
-antes dessa mudança, com "Error: write EOF" indicando
-o fechamento da conexão.
+### Processing Flow
 
-### Processing Flow 
+OCR processing time varies depending on file size and format, so the system processes documents asynchronously to avoid timeouts and connection errors.
+
+Flow:
 
 1. User uploads a document
+
 2. Document is stored and marked as PENDING
-3. OCR processing extracts text
-4. Document status is updated to COMPLETED
-5. User can ask questions about the extracted text
-6. Each interaction is stored for historical tracking
+
+3. OCR runs asynchronously and extracts text
+
+4. Document status is updated to COMPLETED (or FAILED)
+
+5. The extracted text is explained using the LLM
+
+6. The user can ask questions about the document
+
+7. All interactions are stored for history and future access
+
+This approach prevents issues previously observed, such as request blocking and Error: write EOF.
 
 ### OCR
 
--  Image OCR is fully supported using Tesseract.js
-- PDF OCR is implemented through pdf2pic conversion, and then Image OCR
-- On Windows, PDF OCR requires ImageMagick/GraphicsMagick
+- Image OCR is fully supported using Tesseract.js
+
+- PDF OCR works by converting each page to an image and then applying image OCR
+
+- Scanned PDFs require image conversion before OCR
+
+- On Windows, PDF OCR requires ImageMagick or GraphicsMagick
+
 - The PDF OCR pipeline is fully compatible with Linux environments
 
-### PDF OCR
+- PDF OCR Notes
 
-Although the case requires OCR for invoice images, the system was designed to also support PDF OCR.
+- Although the case focuses on invoice image OCR, the system was designed to support PDFs as well.
 
-However, PDF OCR requires native image processing binaries (GraphicsMagick/ImageMagick).
+- PDF OCR depends on native image processing binaries. If these are not available, the document is safely marked as FAILED without crashing the application. Image OCR continues to work normally.
 
-The current implementation supports PDF-to-image conversion and OCR, but on environments without these binaries, the process fails, marking the document as FAILED without crashing the system.
-Image OCR works gracefully.
+### LLM Interaction (OpenAI API)
 
-### LLM Interaction (OPENAI API)
+- The LLM integration is fully implemented.
 
-The LLM integration is fully implemented..
-Due to OpenAI quota limitations, a simulated response was implemented, ensuring the feature remains testable and ready for use.
+- To keep the system testable without paid API credits, a fallback mechanism is in place:
 
-And to ensure the application remains fully testable without paid API credits, the system includes graceful fallback behavior:
+- - If no API key is provided, a simulated explanation is returned
 
-- If no API key is provided, return a simulated explanation
-- If quota is exceeded, return and store a controlled error message is stored 
+- - If the OpenAI quota is exceeded, a controlled error message is returned and stored
 
-### Authentication via OAuth
-Authentication is handled on the frontend using NextAuth (Google OAuth).
-The backend receives the authenticated user identifier via a custom HTTP header (user-id) for simplicity.
+- This allows the full flow (upload → explanation → Q&A) to be tested end-to-end.
 
-During the integration between the frontend authentication and the backend, a foreign key issue was identified when creating documents from authenticated users.
+### Authentication (Google OAuth)
 
-To manage this, the backend implements an upsert operation when handling document uploads. This ensures that the user is automatically created on their first interaction with the system, and reused on subsequent requests.
+- Authentication is handled on the frontend using NextAuth with Google OAuth.
+
+- The backend receives the authenticated user identifier via a custom HTTP header (user-id) for simplicity and statelessness.
+
+- During integration, a foreign key issue was found when creating documents for users that did not yet exist in the database. To solve this, the backend uses an upsert operation on upload, ensuring:
+
+- Users are created automatically on first interaction
+
+- Existing users are reused on subsequent requests
+
+### Deployment Notes
+
+Due to OCR and LLM processing being CPU-intensive and long-running, the backend is not suitable for serverless environments such as Vercel Functions.
+
+For evaluation purposes, the application runs fully in a local environment.
+
+
 
