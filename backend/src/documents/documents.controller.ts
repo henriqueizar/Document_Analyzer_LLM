@@ -45,13 +45,11 @@ export class DocumentsController {
   }
 
   @Post(':id/process')
-  async process(@Param('id') id: string) {
-    this.documentsService
-      .process(id)
-      .catch(err => console.error('PROCESS ERROR:', err));
-    await this.documentsService.process(id);
-    return { message: 'Processing started' };
-  }
+async process(@Param('id') id: string) {
+  console.log('PROCESSANDO DOCUMENTO');
+  await this.documentsService.process(id); 
+  return { message: 'Processing completed' };
+}
 
   @Post(':id/ask')
   async ask(

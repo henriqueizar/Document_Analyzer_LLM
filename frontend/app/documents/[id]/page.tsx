@@ -35,19 +35,33 @@ export default function DocumentPage() {
   if (!data) return <p>Loading...</p>;
 
   const { document, interactions } = data;
-  console.log(document.filePath)
+  // Se o filePath já tem "uploads", não coloque de novo na URL
+const cleanPath = document.filePath.replace(/\\/g, '/');
+
+const imageUrl = `http://localhost:3000/${cleanPath}`;
+  const isImage = /\.(png|jpg|jpeg|webp)$/i.test(document.originalName);
+
   return (
     <div style={{ maxWidth: 800, margin: 'auto', padding: 24 }}>
       <h1>{document.originalName}</h1>
 
-      {/* Imagem */}
-      
-      {document.originalName.endsWith('.png') && (
-        <img
-          src={`http://localhost:3000/${document.filePath.replace(/\\/g, '/')}`}
-          style={{ maxWidth: '100%', marginBottom: 24 }}
-        />
+      {/*Imagem */}
+      {isImage && (
+        <div style={{ marginBottom: 24 }}>
+          <img
+            src={imageUrl}
+            style={{ maxWidth: '100%', borderRadius: 8, border: '1px solid #ddd' }}
+            alt="Preview"
+            onError={(e) => {
+              console.error("Tentativa de carregamento falhou:", imageUrl);
+              if (!imageUrl.includes('uploads/uploads')) {
+                 console.log("Caminho parece OK, erro pode ser no Servidor Estático");
+              }
+            }}
+          />
+        </div>
       )}
+      
 
       {/* Explicaçao */}
       <h2><strong>Explanation</strong></h2>
