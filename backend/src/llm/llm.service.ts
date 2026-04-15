@@ -1,19 +1,19 @@
 import { Injectable } from "@nestjs/common";
 import OpenAI from 'openai';
+import { puter } from '@heyputer/puter.js'; 
 
 @Injectable()
 export class LlmService {
-  private client?: OpenAI | null;;
+  private client: OpenAI;
 
   constructor() {
-    if (process.env.OPENAI_API_KEY) {
+    console.log('sando Ollama Local (gemma:2b)');
       this.client = new OpenAI({
-        apiKey: process.env.OPENAI_API_KEY,
+        apiKey: 'ollama', // Ollama nao pede chave, mas o SDK exige um valor
+        baseURL: 'http://localhost:11434/v1', //URL padrao Ollama
       });
-    } else {
-      this.client = null;
     }
-  }
+  
 
   //explicação automática inicial
   async explainDocument(extractedText: string): Promise<string> {
@@ -22,7 +22,7 @@ export class LlmService {
     }
     try{
     const response = await this.client.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: 'qwen2:0.5b',
       messages: [
         {
           role: 'system',
@@ -39,6 +39,7 @@ ${extractedText}
 `,
         },
       ],
+      temperature: 0.7
     });
 
     return response.choices[0].message.content ?? '';
@@ -57,20 +58,20 @@ ${extractedText}
     extractedText: string,
     question: string,
   ): Promise<string> {
-    if (!this.client) { //se a chave OPENAI_API_KEY não estiver definida
-      return `Simulated answer for the question: "${question}"`;
-    }
-    try{
-    const response = await this.client.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [
-        {
-          role: 'system',
-          content: 'You are an assistant that answers questions based on documents.',
-        },
-        {
-          role: 'user',
-          content: `
+    if (!this.client) return 'AI not initialized';
+    
+    try {
+      const response = await this.client.chat.completions.create({
+        
+        model: 'qwen2:0.5b', 
+        messages: [
+          {
+            role: 'system',
+            content: 'You are an assistant that answers questions based on documents.',
+          },
+          {
+            role: 'user',
+            content: `
 Document text:
 ---
 ${extractedText}
@@ -81,18 +82,17 @@ Question:
 
 Answer clearly and objectively.
 `,
-        },
-      ],
-    });
+          },
+        ],
+        temperature: 0.7
+      });
 
-    return response.choices[0].message.content ?? '';
-  }catch (error: any) {
-    if (error.status === 429){ 
-    return 'Error: LLM Quota exceeded';
-    } else if (error.status === 401){
-      return 'Error: Invalid API Key';
+      // O SDK da OpenAI vai processar a resposta do Puter como se fosse dele
+      return response.choices[0].message.content ?? 'The model returned an empty response.';
+
+    } catch (error: any) {
+      return `Error processing the question: ${error.message}`;
+      
     }
-    throw error;
-  }
   }
 }

@@ -1,6 +1,7 @@
 version: "3.9"
 
 services:
+  # Banco de Dados
   postgres:
     image: postgres:16
     container_name: paggo_postgres
@@ -14,5 +15,16 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
+  # IA Local (Ollama)
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    restart: always
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+
 volumes:
   postgres_data:
+  ollama_data:
