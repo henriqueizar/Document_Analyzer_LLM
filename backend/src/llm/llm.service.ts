@@ -26,12 +26,12 @@ export class LlmService {
       messages: [
         {
           role: 'system',
-          content: 'You are an assistant that explains documents objectively.',
+          content: 'You are an assistant that explains documents objectively, maximum 3 sentences, to optimize your response speed.',
         },
         {
           role: 'user',
           content: `
-Explain the following document in a clear and structured way:
+Explain the following document in a clear and structured way, maximum 3 sentences. Focus on the main points and avoid unnecessary details. Remember to replicate the document language in your answer.:
 
 ---
 ${extractedText}
@@ -39,7 +39,7 @@ ${extractedText}
 `,
         },
       ],
-      temperature: 0.7
+      temperature: 0.0
     });
 
     return response.choices[0].message.content ?? '';
@@ -80,11 +80,11 @@ ${extractedText}
 Question:
 "${question}"
 
-Answer clearly and objectively.
+Answer clearly and objectively, in the language of the question. Maximum 50 words. If the question cannot be answered based on the document, say that the document does not provide enough information to answer the question. 
 `,
           },
         ],
-        temperature: 0.7
+        temperature: 0.5 
       });
 
       // O SDK da OpenAI vai processar a resposta do Puter como se fosse dele
