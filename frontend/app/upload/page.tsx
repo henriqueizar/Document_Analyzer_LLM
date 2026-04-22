@@ -2,7 +2,10 @@
 
 import { useSession } from 'next-auth/react';
 import Link from 'next/link';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+
+// No seu componente de Upload:
+
 
 export default function UploadPage() {
   const { data: session, status } = useSession();
@@ -10,7 +13,23 @@ export default function UploadPage() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
+  const [dots, setDots] = useState('');
+
   const [docId, setdocId] = useState<string | null>(null);
+
+  useEffect(() => { //Upload... animation
+  let interval: NodeJS.Timeout;
+  
+  if (loading) {
+    interval = setInterval(() => {
+      setDots((prev) => (prev.length < 3 ? prev + '.' : ''));
+    }, 500); // Velocidade da animação (500ms)
+  } else {
+    setDots('');
+  }
+
+  return () => clearInterval(interval);
+}, [loading]);
 
   // next-auth loading
   if (status === 'loading') {
@@ -77,6 +96,7 @@ function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
 
 
   return (
+    <main className="flex min-h-screen flex-col items-center text-center justify-center p-24">
     <div style={{ padding: '2rem' }}>
       <h1>Upload Document</h1>
 
@@ -94,8 +114,13 @@ function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
 
   <br /><br />
 
-  <button type="submit" disabled={loading}>
-    {loading ? 'Uploading...' : 'Upload'}
+  <button type="submit" disabled={loading} className="w-40 h-12 flex items-center justify-center rounded-md">
+    <span className="flex">
+    {loading ? 'Uploading' : 'Upload'}
+    {loading && (
+      <span className="w-6 text-left inline-block">{dots}</span>
+    )}
+  </span>
   </button>
   {docId && !loading &&(
       <Link href={`/documents/${docId}`}>
@@ -108,5 +133,6 @@ function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
 
       {message && <p>{message}</p>}
     </div>
+    </main>
   );
 }

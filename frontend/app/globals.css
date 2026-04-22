@@ -22,7 +22,7 @@
 
 .upload-button {
 
-  padding: 8px 12px;
+  
   border-radius: 6px;
   border: 1px solid #ccc;
   cursor: pointer;
@@ -45,12 +45,16 @@
   background-color: #dcdcdc;
 }
 body {
+  display: flex;
+  justify-content: center;
+  align-items: center;
   background: var(--background);
   font-size: larger;
   color: var(--foreground);
   font-family: monospace;
   background: #f7f7f7;
   color: #111;
+  
 }
 h2 {
   font-weight: 600;
