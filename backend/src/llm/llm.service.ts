@@ -7,7 +7,7 @@ export class LlmService {
   private client: OpenAI;
 
   constructor() {
-    console.log('sando Ollama Local (gemma:2b)');
+    console.log('usando Ollama Local (gemma:2b)');
       this.client = new OpenAI({
         apiKey: 'ollama', // Ollama nao pede chave, mas o SDK exige um valor
         baseURL: 'http://localhost:11434/v1', //URL padrao Ollama
@@ -22,16 +22,16 @@ export class LlmService {
     }
     try{
     const response = await this.client.chat.completions.create({
-      model: 'qwen2:0.5b',
+      model: 'gemma:2b',
       messages: [
         {
           role: 'system',
-          content: 'You are an assistant that explains documents objectively, maximum 3 sentences, to optimize your response speed.',
+          content: 'You are an assistant that explains documents objectively, maximum of 3 paragraphs. Use the language of the document in your explanation.',
         },
         {
           role: 'user',
           content: `
-Explain the following document in a clear and structured way, maximum 3 sentences. Focus on the main points and avoid unnecessary details. Remember to replicate the document language in your answer.:
+Explain the following document in a clear and structured way, concisely, with maximum of 3 paragraphs. Focus on the main points and avoid unnecessary details:
 
 ---
 ${extractedText}
@@ -63,7 +63,7 @@ ${extractedText}
     try {
       const response = await this.client.chat.completions.create({
         
-        model: 'qwen2:0.5b', 
+        model: 'gemma:2b', 
         messages: [
           {
             role: 'system',
@@ -80,11 +80,11 @@ ${extractedText}
 Question:
 "${question}"
 
-Answer clearly and objectively, in the language of the question. Maximum 50 words. If the question cannot be answered based on the document, say that the document does not provide enough information to answer the question. 
+Answer clearly and objectively. USE THE LANGUAGE OF THE QUESTION. Maximum 50 words. If the question cannot be answered based on the document, say that the document does not provide enough information to answer the question. 
 `,
           },
         ],
-        temperature: 0.5 
+        temperature: 0.1 
       });
 
       // O SDK da OpenAI vai processar a resposta do Puter como se fosse dele
