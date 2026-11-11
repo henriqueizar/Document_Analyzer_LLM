@@ -14,6 +14,8 @@ import { join } from 'path';
 import { AppModule } from '../src/app.module';
 import { LlmService } from '../src/llm/llm.service';
 import { JWT_AUDIENCE, JWT_ISSUER } from '../src/auth/auth.constants';
+import { PrismaService } from '../src/prisma/prisma.service';
+import { hashPassword } from '../src/auth/password';
 
 try {
   process.loadEnvFile();
@@ -57,6 +59,12 @@ describe('Documents API (e2e)', () => {
       .compile();
     app = moduleRef.createNestApplication();
     await app.init();
+    // Local accounts: the guard only accepts tokens of existing, active users.
+    const prisma = app.get(PrismaService);
+    const passwordHash = await hashPassword('e2e-password');
+    for (const email of [ALICE, MALLORY]) {
+      await prisma.user.create({ data: { email, name: email.split('@')[0], passwordHash } });
+    }
     alice = `Bearer ${await tokenFor(ALICE)}`;
     mallory = `Bearer ${await tokenFor(MALLORY)}`;
   });
@@ -148,6 +156,35 @@ describe('Documents API (e2e)', () => {
 
     it('uploads are no longer served publicly', async () => {
       await http().get('/uploads/anything.pdf').expect(404);
+    });
+  });
+
+  describe('local accounts', () => {
+    it('reports whether the first-run setup is needed', async () => {
+      const { body } = await http().get('/auth/setup').expect(200);
+      expect(typeof body.needsSetup).toBe('boolean');
+    });
+
+    it('logs in with the right password only, without exposing the hash', async () => {
+      const { body } = await http()
+        .post('/auth/login')
+        .send({ email: ALICE.toUpperCase(), password: 'e2e-password' })
+        .expect(200);
+      expect(body).toMatchObject({ email: ALICE, role: 'USER' });
+      expect(body).not.toHaveProperty('passwordHash');
+      await http().post('/auth/login').send({ email: ALICE, password: 'wrong-password' }).expect(401);
+    });
+
+    it('returns the current user and refuses user management to non-admins', async () => {
+      const { body } = await http().get('/auth/me').set('Authorization', alice).expect(200);
+      expect(body.email).toBe(ALICE);
+      await http().get('/users').set('Authorization', alice).expect(403);
+      await http().get('/users').expect(401);
+    });
+
+    it('rejects tokens of accounts that do not exist', async () => {
+      const ghost = `Bearer ${await tokenFor(`ghost-${runId}@example.com`)}`;
+      await http().get('/documents').set('Authorization', ghost).expect(401);
     });
   });
 

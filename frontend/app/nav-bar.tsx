@@ -8,7 +8,8 @@ export default function NavBar() {
   const pathname = usePathname();
   const router = useRouter();
 
-  if (pathname === '/') return null;
+  // No back button on the home page or on the screens shown before signing in.
+  if (pathname === '/' || pathname === '/login' || pathname === '/setup') return null;
 
   function goBack() {
     // Opened directly (new tab, bookmark): there is no in-app page to go back to.

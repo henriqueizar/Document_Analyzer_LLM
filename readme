@@ -16,7 +16,6 @@ local LLM, and ask questions about it.
 - Docker (Docker Desktop on macOS/Windows)
 - [Ollama](https://ollama.com) — on macOS install the native app (`brew install ollama`
   or the installer); it uses the Apple GPU. Docker on macOS cannot use the GPU.
-- A Google OAuth client (for sign-in)
 
 No ImageMagick, GraphicsMagick or Ghostscript is needed: PDFs are read and rendered
 in Node.
@@ -40,8 +39,6 @@ Fill in:
 
 - `BACKEND_JWT_SECRET` — the **same** value in both files (`openssl rand -base64 32`).
 - `NEXTAUTH_SECRET` — another random value (`openssl rand -base64 32`).
-- `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` — from Google Cloud Console. The
-  authorized redirect URI is `http://localhost:3001/api/auth/callback/google`.
 
 3. Start PostgreSQL
 
@@ -95,9 +92,15 @@ Frontend runs on http://localhost:3001
 
 7. Usage
 
-Open http://localhost:3001, sign in with Google, upload a document (PDF or image),
-wait for the automatic explanation, then ask questions. Previous documents and chats
-are under "My documents".
+Open http://localhost:3001. On the first run the app asks you to **create the
+administrator account** (if you use the app alone, this is your account). Then upload a
+document (PDF or image), wait for the automatic explanation and ask questions. Previous
+documents and chats are under "My documents". The administrator adds other people under
+"Users"; everyone can change their password under "Account".
+
+Accounts created with Google sign-in in earlier versions are kept with their documents:
+the administrator sets a password for them under "Users" (or, for your own account, use
+the same e-mail when creating the administrator).
 
 ### Tests
 
@@ -125,7 +128,7 @@ the document cannot answer (which must be refused), and prints PASS/FAIL per cas
 
 Two independent services:
 
-- Frontend (http://localhost:3001): Next.js, Google sign-in with NextAuth, upload UI,
+- Frontend (http://localhost:3001): Next.js, local sign-in with NextAuth, upload UI,
   document view and chat.
 - Backend (http://localhost:3000): NestJS API for OCR, LLM interaction and persistence
   (Prisma + PostgreSQL in Docker).
@@ -139,15 +142,24 @@ is used instead.
 
 ### Authentication
 
-- Users sign in on the frontend with Google (NextAuth).
+Local accounts only; no external identity provider.
+
+- **First run:** while no administrator exists, the app shows a setup screen that creates
+  one (`POST /auth/setup`, refused once an administrator exists). Do it right after
+  installing.
+- **Sign-in:** e-mail and password, checked by the backend (`POST /auth/login`).
+  Passwords are stored as salted scrypt hashes, never in plain text. After 5 failed
+  attempts an e-mail is blocked for 15 minutes. Sessions last 12 hours.
+- **Roles:** administrators add users and reset passwords under "Users"; every user can
+  change their own password under "Account".
 - The frontend route `/api/backend-token` checks the NextAuth session on the server and
   issues a short-lived (5 min) token signed with `BACKEND_JWT_SECRET`. The browser
   sends it to the backend as `Authorization: Bearer <token>`.
-- The backend verifies the token on every `/documents` route and only ever returns the
+- The backend verifies the token and looks the account up on every request (a removed
+  account or a changed role takes effect immediately), and only ever returns the
   caller's own documents (another user's document is a 404).
 - Uploaded files are not public: they are served by `GET /documents/:id/file` to their
   owner only.
-- Users are created automatically (upsert) on their first upload.
 
 ### Processing flow
 

@@ -13,11 +13,21 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum Role {
+  ADMIN
+  USER
+}
+
 model User {
-  id        String     @id @default(uuid())
-  email     String     @unique
-  documents Document[]
-  createdAt DateTime   @default(now())
+  id           String     @id @default(uuid())
+  email        String     @unique
+  name         String?
+  /// scrypt hash (never the password itself). Null for accounts created
+  /// before local login: the admin sets a password to activate them.
+  passwordHash String?
+  role         Role       @default(USER)
+  documents    Document[]
+  createdAt    DateTime   @default(now())
 }
 
 enum DocumentStatus {

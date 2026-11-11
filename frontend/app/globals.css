@@ -211,7 +211,10 @@ small {
   font-size: 0.9em;
 }
 input[type='text'],
-input:not([type]) {
+input[type='email'],
+input[type='password'],
+input:not([type]),
+select {
   padding: 8px 12px;
   border-radius: 6px;
   border: 1px solid #ccc;
@@ -246,4 +249,88 @@ button:hover {
 button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+/* Forms: label above field, one column */
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  max-width: 400px;
+  text-align: left;
+}
+.form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-weight: 600;
+}
+.form label small {
+  font-weight: 400;
+}
+.form button[type='submit'] {
+  align-self: flex-start;
+}
+.centered .form button[type='submit'] {
+  align-self: stretch;
+}
+.hint {
+  max-width: 400px;
+}
+.success {
+  color: #1b6e2d;
+}
+
+/* Small labels next to names */
+.badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 6px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 0.75em;
+  background: #fff;
+}
+.badge-warn {
+  border-color: #b26b00;
+  color: #5c3b00;
+  background: #fff7e6;
+}
+
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
+/* Account details */
+.details {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 16px;
+  margin-bottom: 8px;
+}
+.details dt {
+  font-weight: 600;
+}
+
+/* Users list */
+.user-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 0;
+  border-bottom: 1px solid #ddd;
+}
+.user-row > p {
+  flex-basis: 100%;
+  margin: 0;
+}
+.inline-form {
+  display: flex;
+  gap: 8px;
 }

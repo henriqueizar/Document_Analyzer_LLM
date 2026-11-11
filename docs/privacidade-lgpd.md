@@ -24,7 +24,8 @@ A **instalação** usa a internet uma vez: pacotes npm, imagens Docker e o model
 | Arquivos enviados (PDF, imagens) | Upload do usuário | Pasta `backend/uploads/` (disco local) | Somente o dono do documento, pela rota autenticada `GET /documents/:id/file` |
 | Texto extraído (OCR / camada de texto) | Processamento local | PostgreSQL local (`Document.extractedText`) | Somente o dono |
 | Perguntas, respostas e explicações | Usuário / LLM local | PostgreSQL local (`LlmInteraction`) | Somente o dono |
-| E-mail e nome do usuário | Login | PostgreSQL local (`User`) e cookie de sessão | O próprio usuário |
+| Nome, e-mail e papel do usuário | Cadastro feito pelo administrador (ou configuração inicial) | PostgreSQL local (`User`) e cookie de sessão | O próprio usuário; o administrador vê a lista de usuários |
+| Senha | Usuário | PostgreSQL local, **somente o hash scrypt com sal** (a senha nunca é armazenada) | Ninguém |
 
 Documentos empresariais frequentemente contêm dados pessoais de terceiros (nomes, CPF,
 endereços, salários). Eles ficam nos mesmos lugares acima.
@@ -40,7 +41,7 @@ endereços, salários). Eles ficam nos mesmos lugares acima.
 | LLM (Ollama) | Local (`OLLAMA_URL`, padrão `http://localhost:11434`) | Nenhuma por parte da aplicação. |
 | Banco (PostgreSQL em Docker) | Local, porta ligada só a `127.0.0.1` | Nenhuma. |
 | Prisma CLI (migrações) | Local | Nenhuma, com `CHECKPOINT_DISABLE=1` no `backend/.env` (padrão do `.env.example`). |
-| **Login com Google** | **Externo** | **Sim: o login passa pelo Google, que recebe o evento de login; a aplicação recebe nome e e-mail. Em remoção (substituído por login local).** |
+| Login (contas locais) | Local | Nenhuma. E-mail e senha são verificados pelo backend; não há provedor de identidade externo. |
 
 Fora do escopo da aplicação: o próprio sistema operacional, o Docker Desktop e o app do
 Ollama podem verificar atualizações por conta própria.
@@ -48,6 +49,9 @@ Ollama podem verificar atualizações por conta própria.
 ## Medidas implementadas
 
 - Processamento de documentos (OCR e LLM) 100% local.
+- Login local: senhas com hash scrypt e sal aleatório; bloqueio de 15 minutos após
+  5 tentativas erradas; sessão de 12 horas; conta removida ou com papel alterado perde o
+  acesso imediatamente.
 - Autenticação em todas as rotas de documentos; cada usuário só acessa os próprios
   documentos (um documento de outra pessoa responde 404, igual a um inexistente).
 - Arquivos enviados não são públicos (não há servidor de arquivos estático).
@@ -58,11 +62,12 @@ Ollama podem verificar atualizações por conta própria.
 
 ## O que ainda falta
 
-- Login local (sem Google). *Em andamento.*
 - Exclusão de documentos e dos dados derivados (direito de eliminação, art. 18).
 - Registro de auditoria: quem acessou ou perguntou o quê (registro das operações, art. 37).
 - Permissões por equipe (acesso mínimo necessário).
 - Política de retenção e detecção de dados sensíveis.
+- A tela de configuração inicial fica aberta até o administrador ser criado: faça a
+  configuração logo após instalar, antes de expor a aplicação na rede.
 - Para uso em produção: criptografia em repouso (disco / banco), senhas fortes no banco,
   HTTPS na rede interna e backups.
 

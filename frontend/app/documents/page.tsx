@@ -47,7 +47,7 @@ export default function DocumentsListPage() {
     return (
       <div className="centered">
         <p>You must be logged in to see your documents.</p>
-        <Link href="/">Go to login</Link>
+        <Link href="/login">Go to login</Link>
       </div>
     );
   }
