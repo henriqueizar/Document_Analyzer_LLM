@@ -63,6 +63,23 @@ describe('LlmService', () => {
       ).resolves.toBe('Não encontrei essa informação no documento.');
     });
 
+    it('reduces a refusal with extra words to the standard sentence', async () => {
+      fetchMock.mockResolvedValue(
+        ok('A multa para atraso no pagamento não está especificada no documento. Não encontrei essa informação no documento.'),
+      );
+      await expect(
+        new LlmService().askQuestion(contract, 'Qual é a multa por atraso?'),
+      ).resolves.toBe('Não encontrei essa informação no documento.');
+    });
+
+    it('keeps partial answers that cite pages even if they also say something was not found', async () => {
+      const partial = 'O valor mensal é de R$ 12.500,00 [p. 2]. Não encontrei essa informação no documento quanto ao CNPJ.';
+      fetchMock.mockResolvedValue(ok(partial));
+      await expect(
+        new LlmService().askQuestion(contract, 'Qual o valor mensal e o CNPJ?'),
+      ).resolves.toBe(partial);
+    });
+
     it('flags numbers that are not in the document', async () => {
       fetchMock.mockResolvedValue(ok('O valor mensal é de R$ 15.000,00 [p. 2].'));
       const answer = await new LlmService().askQuestion(contract, 'Qual é o valor mensal?');

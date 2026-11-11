@@ -13,6 +13,10 @@ const NUMBER = /\d[\d.,]*\d|\d{2,}/g;
 
 const digitsOf = (s: string) => s.replace(/\D/g, '');
 
+export function hasCitation(text: string): boolean {
+  return new RegExp(CITATION.source, 'i').test(text);
+}
+
 export function isNotFound(answer: string): boolean {
   const a = normalize(answer);
   return Object.values(NOT_FOUND).some((phrase) =>

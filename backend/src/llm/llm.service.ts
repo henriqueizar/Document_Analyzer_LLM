@@ -6,11 +6,12 @@ import { detectLanguage, Language } from './language';
 import {
   answerMessages,
   DocumentContext,
+  NOT_FOUND,
   explainMessages,
   partialExplanationNote,
   Turn,
 } from './prompts';
-import { checkGrounding, groundingWarning } from './grounding';
+import { checkGrounding, groundingWarning, hasCitation, isNotFound } from './grounding';
 
 export { DEFAULT_LLM_MODEL } from './ollama.client';
 
@@ -81,6 +82,10 @@ export class LlmService {
     });
     const answer = stripPreamble(raw) || '';
     if (!answer) return lang === 'pt' ? 'O modelo não retornou resposta.' : 'The model returned an empty response.';
+    // "A multa não está especificada. Não encontrei essa informação no documento."
+    // -> just the standard sentence. Answers that cite pages carry real content
+    // (e.g. one part found, another not) and are kept as they are.
+    if (isNotFound(answer) && !hasCitation(answer)) return NOT_FOUND[lang];
 
     return this.withGroundingCheck(answer, doc, lang, { requireCitation: true, ignore: question });
   }
