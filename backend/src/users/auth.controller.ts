@@ -33,7 +33,15 @@ export class AuthController {
   @Get('me')
   @UseGuards(AuthGuard)
   me(@CurrentUser() user: AuthUser) {
-    return user;
+    return this.users.me(user.email);
+  }
+
+  /** The user read the privacy notice shown after the first login. */
+  @Post('me/privacy')
+  @HttpCode(200)
+  @UseGuards(AuthGuard)
+  acceptPrivacy(@CurrentUser() user: AuthUser) {
+    return this.users.acceptPrivacyNotice(user.email);
   }
 
   @Post('me/password')

@@ -178,6 +178,9 @@ describe('Documents API (e2e)', () => {
     it('returns the current user and refuses user management to non-admins', async () => {
       const { body } = await http().get('/auth/me').set('Authorization', alice).expect(200);
       expect(body.email).toBe(ALICE);
+      expect(body.privacyAcceptedAt).toBeNull();
+      const accepted = await http().post('/auth/me/privacy').set('Authorization', alice).expect(200);
+      expect(accepted.body.privacyAcceptedAt).toEqual(expect.any(String));
       await http().get('/users').set('Authorization', alice).expect(403);
       await http().get('/users').expect(401);
     });

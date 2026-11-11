@@ -122,6 +122,16 @@ LLM_NUM_CTX=4096 npm run eval:llm    # small context: exercises passage selectio
 It asks factual questions (which must be answered with page citations) and questions
 the document cannot answer (which must be refused), and prints PASS/FAIL per case.
 
+To check that the application works with no internet access (needs Docker):
+
+```bash
+npm run verify:offline
+```
+
+It runs the end-to-end test (login, upload, real OCR, questions) in a container on a
+Docker network with no route to the internet, after proving that the container cannot
+reach any external host. See `docs/privacidade-lgpd.md` and the in-app Privacy page.
+
 ## Development details
 
 ### Architecture

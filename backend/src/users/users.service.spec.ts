@@ -128,4 +128,13 @@ describe('UsersService', () => {
       await expect(users.authenticate('bob@example.com', 'password2')).resolves.toBeTruthy();
     });
   });
+
+  describe('privacy notice', () => {
+    it('is pending for a new user and recorded once accepted', async () => {
+      await users.createFirstAdmin(admin);
+      expect((await users.me('ana@example.com')).privacyAcceptedAt).toBeNull();
+      const accepted = await users.acceptPrivacyNotice('ana@example.com');
+      expect(accepted.privacyAcceptedAt).toBeInstanceOf(Date);
+    });
+  });
 });

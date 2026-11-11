@@ -19,6 +19,8 @@ export interface PublicUser {
   createdAt: Date;
   /** False for accounts created before local login that have no password yet. */
   active: boolean;
+  /** When the privacy notice was accepted; null until the user reads it. */
+  privacyAcceptedAt: Date | null;
 }
 
 export interface NewUser {
@@ -69,6 +71,20 @@ export class UsersService {
   async findByEmail(email: string): Promise<PublicUser | null> {
     const user = await this.prisma.user.findUnique({ where: { email: normalizeEmail(email) } });
     return user && user.passwordHash ? toPublic(user) : null;
+  }
+
+  async me(email: string): Promise<PublicUser> {
+    const user = await this.prisma.user.findUnique({ where: { email: normalizeEmail(email) } });
+    if (!user) throw new NotFoundException('User not found.');
+    return toPublic(user);
+  }
+
+  async acceptPrivacyNotice(email: string): Promise<PublicUser> {
+    const user = await this.prisma.user.update({
+      where: { email: normalizeEmail(email) },
+      data: { privacyAcceptedAt: new Date() },
+    });
+    return toPublic(user);
   }
 
   async list(): Promise<PublicUser[]> {
@@ -163,5 +179,6 @@ function toPublic(user: User): PublicUser {
     role: user.role,
     createdAt: user.createdAt,
     active: Boolean(user.passwordHash),
+    privacyAcceptedAt: user.privacyAcceptedAt ?? null,
   };
 }

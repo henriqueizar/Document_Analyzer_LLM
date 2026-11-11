@@ -26,6 +26,8 @@ model User {
   /// before local login: the admin sets a password to activate them.
   passwordHash String?
   role         Role       @default(USER)
+  /// When the user read and accepted the privacy notice (shown after the first login).
+  privacyAcceptedAt DateTime?
   documents    Document[]
   createdAt    DateTime   @default(now())
 }

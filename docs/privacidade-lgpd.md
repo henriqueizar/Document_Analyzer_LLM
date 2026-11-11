@@ -73,9 +73,19 @@ Ollama podem verificar atualizações por conta própria.
 
 ## Como verificar
 
-1. **Revisão do código:** procure chamadas de rede (`fetch`, `http`, SDKs), telemetria
-   e downloads em tempo de execução.
-2. **Teste sem internet:** com a aplicação instalada, desligue a internet e use-a
-   normalmente (upload, OCR, perguntas).
-3. **Monitor de conexões:** use um firewall de saída (por exemplo, LuLu no macOS) e
-   observe que nenhum processo da aplicação conecta a hosts externos.
+A tela **Privacy** da aplicação (mostrada após o primeiro login e acessível pelo rodapé)
+explica estas três formas:
+
+1. **Pedir a uma IA que audite o código.** A tela traz um texto pronto (em português e
+   em inglês) que pede à IA para *procurar* vazamentos — rede, telemetria, autenticação
+   externa, CDNs, downloads — e não para confirmar que não há nenhum. Uma IA só lê o
+   código do repositório e pode errar; por isso as verificações abaixo.
+2. **Usar sem internet:** desligue a rede e use a aplicação normalmente (login, upload,
+   OCR, perguntas). Opcionalmente, observe as conexões com um firewall de saída (por
+   exemplo, LuLu no macOS).
+3. **Verificação automática:** `cd backend && npm run verify:offline` (requer Docker).
+   O teste de ponta a ponta (login, upload, OCR real de imagem e de PDF, isolamento entre
+   usuários) roda num container ligado a uma rede Docker `internal`, sem rota para a
+   internet. Antes, o script prova que o container não alcança nenhum host externo (DNS,
+   TCP e HTTPS bloqueados); se alcançar, a verificação é abortada. A LLM é simulada nesse
+   teste; no uso real ela é o Ollama local (`OLLAMA_URL`).

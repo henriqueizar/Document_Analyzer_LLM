@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import Providers from './providers';
 import NavBar from './nav-bar';
+import Link from 'next/link';
 
 export const metadata: Metadata = {
   title: "Document LLM Analyzer",
@@ -19,6 +20,9 @@ export default function RootLayout({
         <Providers>
           <NavBar />
           <main className="page">{children}</main>
+          <footer className="footer">
+            Runs entirely on this machine. <Link href="/privacy">Privacy</Link>
+          </footer>
         </Providers>
       </body>
     </html>
