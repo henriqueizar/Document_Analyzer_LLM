@@ -1,28 +1,32 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger } from '@nestjs/common';
 import OpenAI from 'openai';
-import { puter } from '@heyputer/puter.js'; 
+
+/** OpenAI-compatible endpoint. Default: Ollama running natively on the host. */
+export const DEFAULT_LLM_BASE_URL = 'http://localhost:11434/v1';
+export const DEFAULT_LLM_MODEL = 'gemma:2b';
 
 @Injectable()
 export class LlmService {
-  private client: OpenAI;
+  private readonly logger = new Logger(LlmService.name);
+  private readonly client: OpenAI;
+  readonly model: string;
 
   constructor() {
-    console.log('usando Ollama Local (gemma:2b)');
-      this.client = new OpenAI({
-        apiKey: 'ollama', // Ollama nao pede chave, mas o SDK exige um valor
-        baseURL: 'http://localhost:11434/v1', //URL padrao Ollama
-      });
-    }
-  
+    const baseURL = process.env.LLM_BASE_URL || DEFAULT_LLM_BASE_URL;
+    this.model = process.env.LLM_MODEL || DEFAULT_LLM_MODEL;
+    this.client = new OpenAI({
+      // Ollama ignores the key, but the SDK requires a value.
+      apiKey: process.env.LLM_API_KEY || 'ollama',
+      baseURL,
+    });
+    this.logger.log(`Using LLM "${this.model}" at ${baseURL}`);
+  }
 
-  //explicação automática inicial
+  // automatic initial explanation
   async explainDocument(extractedText: string): Promise<string> {
-    if (!this.client) {
-      return 'Simulated explanation of the document content:\n ' + extractedText;
-    }
     try{
     const response = await this.client.chat.completions.create({
-      model: 'gemma:2b',
+      model: this.model,
       messages: [
         {
           role: 'system',
@@ -53,17 +57,15 @@ ${extractedText}
     throw error;
   }
 }
-  //perguntas do usuario, separando a explicaçao da pergunta
+  // user questions, kept separate from the explanation
   async askQuestion(
     extractedText: string,
     question: string,
   ): Promise<string> {
-    if (!this.client) return 'AI not initialized';
-    
     try {
       const response = await this.client.chat.completions.create({
         
-        model: 'gemma:2b', 
+        model: this.model, 
         messages: [
           {
             role: 'system',
@@ -87,7 +89,6 @@ Answer clearly and objectively. USE THE LANGUAGE OF THE QUESTION. Maximum 50 wor
         temperature: 0.1 
       });
 
-      // O SDK da OpenAI vai processar a resposta do Puter como se fosse dele
       return response.choices[0].message.content ?? 'The model returned an empty response.';
 
     } catch (error: any) {
