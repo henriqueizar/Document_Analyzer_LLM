@@ -148,6 +148,13 @@ describe('LlmService', () => {
       expect(system()).toMatch(/Você resume documentos/);
     });
 
+    it('asks for a page citation in every sentence and flags explanations without any', async () => {
+      fetchMock.mockResolvedValue(ok('Contrato de serviços entre ACME e Beta.'));
+      const explanation = await new LlmService().explainDocument(contract);
+      expect(system()).toMatch(/No fim de cada frase que traz informação do documento, indique a página/);
+      expect(explanation).toMatch(/⚠ Verificação automática: a resposta não cita nenhuma página/);
+    });
+
     it('adds a note (written by code) when only part of a long document was read', async () => {
       process.env.LLM_NUM_CTX = '2400';
       const long = {

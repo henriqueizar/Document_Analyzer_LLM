@@ -67,7 +67,8 @@ async function main() {
   const started = Date.now();
 
   const explanation = await llm.explainDocument(document);
-  const explanationOk = !WARNING.test(explanation) && /12\.500,00|limpeza/i.test(explanation);
+  const explanationOk =
+    !WARNING.test(explanation) && CITATION.test(explanation) && /12\.500,00|limpeza/i.test(explanation);
   failures += explanationOk ? 0 : 1;
   console.log(`${explanationOk ? 'PASS' : 'FAIL'}  explicação\n${indent(explanation)}\n`);
 

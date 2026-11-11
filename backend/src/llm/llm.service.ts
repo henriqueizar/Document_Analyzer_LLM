@@ -59,7 +59,7 @@ export class LlmService {
     });
     let explanation = stripPreamble(raw);
 
-    explanation = this.withGroundingCheck(explanation, doc, lang, { requireCitation: false });
+    explanation = this.withGroundingCheck(explanation, doc, lang, { requireCitation: true });
     if (!doc.complete) explanation += `\n\n${partialExplanationNote(lang, doc)}`;
     return explanation;
   }
