@@ -71,6 +71,13 @@ export interface Turn {
   answer: string;
 }
 
+/**
+ * Message order matters for speed: Ollama reuses the work done for an
+ * identical prompt prefix. The document goes first (in the system message,
+ * right after the rules) and the parts that change per question (history,
+ * question) go last, so follow-up questions about the same excerpts skip
+ * re-reading the document.
+ */
 export function answerMessages(
   lang: Language,
   doc: DocumentContext,
@@ -79,12 +86,14 @@ export function answerMessages(
 ) {
   const label = lang === 'pt' ? 'Pergunta' : 'Question';
   return [
-    { role: 'system' as const, content: ANSWER_RULES[lang] },
+    { role: 'system' as const, content: `${ANSWER_RULES[lang]}
+
+${documentBlock(lang, doc)}` },
     ...history.flatMap((t) => [
-      { role: 'user' as const, content: t.question },
+      { role: 'user' as const, content: `${label}: ${t.question}` },
       { role: 'assistant' as const, content: t.answer },
     ]),
-    { role: 'user' as const, content: `${documentBlock(lang, doc)}\n\n${label}: ${question}` },
+    { role: 'user' as const, content: `${label}: ${question}` },
   ];
 }
 

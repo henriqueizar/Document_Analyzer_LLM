@@ -43,9 +43,9 @@ describe('LlmService', () => {
       expect(system()).toMatch(/Use SOMENTE as informações dos trechos/);
       expect(system()).toMatch(/Não encontrei essa informação no documento\./);
       expect(system()).not.toMatch(/\b(the|answer|document does not)\b/i);
-      expect(lastUser()).toMatch(/<documento nome="contrato.pdf">/);
-      expect(lastUser()).toMatch(/\[p\. 2\]\nCLÁUSULA 3/);
-      expect(lastUser()).toMatch(/Pergunta: Qual é o valor mensal\?$/);
+      expect(system()).toMatch(/<documento nome="contrato.pdf">/);
+      expect(system()).toMatch(/\[p\. 2\]\nCLÁUSULA 3/);
+      expect(lastUser()).toBe('Pergunta: Qual é o valor mensal?');
       expect(sent().options.temperature).toBe(0);
     });
 
@@ -53,7 +53,7 @@ describe('LlmService', () => {
       fetchMock.mockResolvedValue(ok('60 days [p. 3].'));
       await new LlmService().askQuestion(contract, 'What is the termination notice period?');
       expect(system()).toMatch(/Use ONLY the information/);
-      expect(lastUser()).toMatch(/Question: What is the termination/);
+      expect(lastUser()).toMatch(/^Question: What is the termination/);
     });
 
     it('accepts the fixed "not found" answer without a warning', async () => {
@@ -90,6 +90,18 @@ describe('LlmService', () => {
       expect(roles).toEqual(['system', 'user', 'assistant', 'user']);
     });
 
+    it('keeps the document at the start of the prompt so follow-ups can reuse it', async () => {
+      fetchMock.mockImplementation(async () => ok('R$ 12.500,00 [p. 2].'));
+      const service = new LlmService();
+      await service.askQuestion(contract, 'Qual é o valor mensal?');
+      await service.askQuestion(contract, 'E o reajuste?', [
+        { question: 'Qual é o valor mensal?', answer: 'R$ 12.500,00 [p. 2].' },
+      ]);
+      // Same system message (rules + document) for both: the expensive prefix is shared.
+      expect(sent(1).messages[0]).toEqual(sent(0).messages[0]);
+      expect(sent(1).messages[0].content).toMatch(/<documento/);
+    });
+
     it('sends only the relevant passages of a long document, with their pages', async () => {
       process.env.LLM_NUM_CTX = '2600'; // tiny context to force selection
       const long = {
@@ -103,9 +115,9 @@ describe('LlmService', () => {
       };
       fetchMock.mockResolvedValue(ok('Comarca de Brasília [p. 4].'));
       await new LlmService().askQuestion(long, 'Qual é o foro do contrato?');
-      expect(lastUser()).toMatch(/Comarca de Brasília/);
-      expect(lastUser()).toMatch(/seleção do documento \(páginas .*4.* de 4\)/);
-      expect(lastUser()).not.toMatch(/R\$ 12\.500,00/);
+      expect(system()).toMatch(/Comarca de Brasília/);
+      expect(system()).toMatch(/seleção do documento \(páginas .*4.* de 4\)/);
+      expect(system()).not.toMatch(/R\$ 12\.500,00/);
     });
   });
 
