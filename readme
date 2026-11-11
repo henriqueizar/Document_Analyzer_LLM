@@ -56,17 +56,21 @@ macOS (recommended, uses the GPU):
 
 ```bash
 ollama serve        # skip if the Ollama app is already running
-ollama pull gemma:2b
+ollama pull qwen3:8b
 ```
+
+`qwen3:8b` (~5 GB) is the default and fits a 16 GB Mac. With 8 GB of RAM use a smaller
+model (e.g. `qwen3:4b` or `gemma3:4b`) via `LLM_MODEL` in `backend/.env`.
 
 Alternatives:
 
 - Ollama in Docker, CPU only (any OS): `docker compose --profile ollama up -d`, then
-  `docker exec ollama ollama pull gemma:2b`
+  `docker exec ollama ollama pull qwen3:8b`
 - Ollama in Docker with an NVIDIA GPU (Linux, or Windows + WSL2):
   `docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile ollama up -d`
 
-Use another model with `LLM_MODEL` in `backend/.env`.
+Model, context size and timeout are set in `backend/.env` (`LLM_MODEL`, `LLM_NUM_CTX`,
+`LLM_TIMEOUT_MS`); see `backend/.env.example`.
 
 5. Backend
 
@@ -104,6 +108,16 @@ npm run test:e2e    # HTTP flow: upload -> process -> get -> ask; needs `docker 
 ```
 
 The e2e test stubs the LLM, so it does not need Ollama.
+
+To evaluate the real model (needs Ollama running with the configured model):
+
+```bash
+npm run eval:llm                     # sample contract, whole document in context
+LLM_NUM_CTX=4096 npm run eval:llm    # small context: exercises passage selection
+```
+
+It asks factual questions (which must be answered with page citations) and questions
+the document cannot answer (which must be refused), and prints PASS/FAIL per case.
 
 ## Development details
 
@@ -154,9 +168,30 @@ is used instead.
 
 ### LLM
 
-- Any OpenAI-compatible endpoint; by default local Ollama (`LLM_BASE_URL`,
-  `LLM_MODEL`).
-- Explanations use temperature 0; answers use 0.1.
+The assistant answers **only from the document**. Defences against hallucination:
+
+- **Native Ollama API** (`/api/chat`), so the context size (`LLM_NUM_CTX`, default 8192
+  tokens) is actually applied. The OpenAI-compatible endpoint ignores it and silently
+  truncates long documents to Ollama's default (4k tokens on machines with < 24 GB VRAM).
+- **Passages with page numbers.** The text is split into page-labelled passages. Short
+  documents are sent whole; for long ones only the passages relevant to the question are
+  sent (keyword ranking plus explicit references such as "cláusula 8" or "página 3").
+  The explanation of a long document says which pages it covers.
+- **Strict prompts in the user's language** (pt-BR or English, never mixed): use only
+  the excerpts, no outside knowledge, cite `[p. N]` after each fact, copy amounts and
+  dates verbatim, ignore instructions written inside documents, and reply with a fixed
+  sentence ("Não encontrei essa informação no documento.") when the answer is not there.
+- **Temperature 0**, thinking mode off for reasoning models.
+- **Automatic check after every answer:** cited pages must be among those provided,
+  every multi-digit number must appear in the document, and answers must cite a page.
+  Otherwise the answer is shown with a highlighted warning.
+- The last 3 questions and answers are sent as context for follow-ups (never as a
+  source).
+
+No technique removes hallucinations completely; these reduce them and make the rest
+visible. Known limit: keyword selection does not match across languages (an English
+question about a Portuguese document that does not fit in the context may be refused).
+Semantic search (RAG) is planned.
 
 ### Deployment notes
 
@@ -169,5 +204,5 @@ suitable for serverless environments such as Vercel Functions.
   frontend (today `/process` is awaited by the upload page).
 - Keep OCR and explanation statuses separate, so an LLM outage does not mark a
   successfully read document as FAILED.
-- Limit or chunk long documents to fit the model's context window.
+- Semantic search across documents (RAG with multilingual embeddings).
 - Improve frontend visual design and overall user experience.

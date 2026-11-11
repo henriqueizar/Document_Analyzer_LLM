@@ -201,6 +201,15 @@ small {
 .llm-text {
   white-space: pre-wrap;
 }
+
+/* Automatic grounding warning appended by the backend */
+.warning {
+  padding: 8px 12px;
+  border-left: 3px solid #b26b00;
+  background: #fff7e6;
+  color: #5c3b00;
+  font-size: 0.9em;
+}
 input[type='text'],
 input:not([type]) {
   padding: 8px 12px;
