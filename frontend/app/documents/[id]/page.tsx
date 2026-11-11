@@ -81,7 +81,7 @@ export default function DocumentPage() {
   const { document, interactions } = data;
 
   return (
-    <div style={{ maxWidth: 800, margin: 'auto', padding: 24 }}>
+    <div>
       <h1>{document.originalName}</h1>
 
       {/* Image */}

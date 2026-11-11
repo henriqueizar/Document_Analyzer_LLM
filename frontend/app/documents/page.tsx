@@ -33,7 +33,7 @@ export default function DocumentsListPage() {
 }, [session]);
 
   return (
-    <div style={{ maxWidth: 800, margin: 'auto', padding: 24 }}>
+    <div>
       <h2>My documents</h2>
 
       {docs.map(doc => (

@@ -85,8 +85,7 @@ function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
 
 
   return (
-    <main className="flex min-h-screen flex-col items-center text-center justify-center p-24">
-    <div style={{ padding: '2rem' }}>
+    <div className="centered">
       <h1>Upload Document</h1>
 
       <form onSubmit={handleSubmit}>
@@ -122,6 +121,5 @@ function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
 
       {message && <p>{message}</p>}
     </div>
-    </main>
   );
 }
