@@ -131,6 +131,24 @@ small {
   color: #666;
 }
 
+/* Document preview (image or PDF) on the document page */
+.preview {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 24px;
+}
+.preview img,
+.preview iframe {
+  width: 100%;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  background: #fff;
+}
+.preview iframe {
+  height: 70vh;
+}
+
 /* LLM output keeps its paragraph breaks */
 .llm-text {
   white-space: pre-wrap;

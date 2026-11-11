@@ -17,11 +17,20 @@ interface DocumentData {
 }
 
 const IMAGE_NAME = /\.(png|jpe?g|webp|bmp|tiff?)$/i;
+const PDF_NAME = /\.pdf$/i;
+
+type PreviewKind = 'image' | 'pdf';
+
+function previewKind(name: string): PreviewKind | null {
+  if (IMAGE_NAME.test(name)) return 'image';
+  if (PDF_NAME.test(name)) return 'pdf';
+  return null;
+}
 
 export default function DocumentPage() {
   const { id } = useParams<{ id: string }>();
   const [data, setData] = useState<DocumentData | null>(null);
-  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [question, setQuestion] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -37,22 +46,23 @@ export default function DocumentPage() {
   }, [load]);
 
   // The file is only served to its owner, so fetch it with the bearer token
-  // and show it through an object URL.
-  const isImage = data ? IMAGE_NAME.test(data.document.originalName) : false;
+  // and show it through an object URL (images inline, PDFs in the browser's
+  // built-in viewer).
+  const kind = data ? previewKind(data.document.originalName) : null;
   useEffect(() => {
-    if (!isImage) return;
+    if (!kind) return;
     let url: string | null = null;
     apiFetch(`/documents/${id}/file`)
       .then((res) => (res.ok ? res.blob() : Promise.reject(new Error('preview failed'))))
       .then((blob) => {
         url = URL.createObjectURL(blob);
-        setImageUrl(url);
+        setPreviewUrl(url);
       })
       .catch((e) => console.error(e));
     return () => {
       if (url) URL.revokeObjectURL(url);
     };
-  }, [id, isImage]);
+  }, [id, kind]);
 
   async function askQuestion() {
     if (!question.trim()) return;
@@ -84,15 +94,21 @@ export default function DocumentPage() {
     <div>
       <h1>{document.originalName}</h1>
 
-      {/* Image */}
-      {imageUrl && (
-        <div style={{ marginBottom: 24 }}>
+      {/* Preview */}
+      {previewUrl && kind === 'image' && (
+        <div className="preview">
           {/* eslint-disable-next-line @next/next/no-img-element -- blob: URL, not optimizable */}
-          <img
-            src={imageUrl}
-            style={{ maxWidth: '100%', borderRadius: 8, border: '1px solid #ddd' }}
-            alt="Preview"
-          />
+          <img src={previewUrl} alt={`Preview of ${document.originalName}`} />
+        </div>
+      )}
+      {previewUrl && kind === 'pdf' && (
+        <div className="preview">
+          <iframe src={previewUrl} title={`Preview of ${document.originalName}`} />
+          <small>
+            <a href={previewUrl} target="_blank" rel="noopener noreferrer">
+              Open the PDF in a new tab
+            </a>
+          </small>
         </div>
       )}
 
