@@ -1,34 +1,32 @@
 import { Injectable, Logger } from '@nestjs/common';
-import OpenAI from 'openai';
 import { stripPreamble } from './clean-response';
+import { ChatMessage, ChatOptions, OllamaClient, ollamaConfigFromEnv } from './ollama.client';
 
-/** OpenAI-compatible endpoint. Default: Ollama running natively on the host. */
-export const DEFAULT_LLM_BASE_URL = 'http://localhost:11434/v1';
-export const DEFAULT_LLM_MODEL = 'gemma:2b';
+export { DEFAULT_LLM_MODEL } from './ollama.client';
 
 @Injectable()
 export class LlmService {
   private readonly logger = new Logger(LlmService.name);
-  private readonly client: OpenAI;
+  private readonly client: OllamaClient;
   readonly model: string;
 
   constructor() {
-    const baseURL = process.env.LLM_BASE_URL || DEFAULT_LLM_BASE_URL;
-    this.model = process.env.LLM_MODEL || DEFAULT_LLM_MODEL;
-    this.client = new OpenAI({
-      // Ollama ignores the key, but the SDK requires a value.
-      apiKey: process.env.LLM_API_KEY || 'ollama',
-      baseURL,
-    });
-    this.logger.log(`Using LLM "${this.model}" at ${baseURL}`);
+    const config = ollamaConfigFromEnv();
+    this.client = new OllamaClient(config);
+    this.model = config.model;
+    this.logger.log(
+      `Using LLM "${config.model}" at ${config.baseUrl} (context ${config.numCtx} tokens)`,
+    );
+  }
+
+  private complete(messages: ChatMessage[], options: ChatOptions) {
+    return this.client.chat(messages, options);
   }
 
   // automatic initial explanation
   async explainDocument(extractedText: string): Promise<string> {
-    try{
-    const response = await this.client.chat.completions.create({
-      model: this.model,
-      messages: [
+    const answer = await this.complete(
+      [
         {
           role: 'system',
           content:
@@ -46,38 +44,26 @@ ${extractedText}
 `,
         },
       ],
-      temperature: 0.0
-    });
+      { temperature: 0, maxTokens: 700 },
+    );
+    return stripPreamble(answer);
+  }
 
-    return stripPreamble(response.choices[0].message.content ?? '');
-  }
- catch (error: any) {
-    if (error.status === 429){ 
-    return 'Error: LLM Quota exceeded';
-    } else if (error.status === 401){
-      return 'Error: Invalid API Key';
-    }
-    throw error;
-  }
-}
   // user questions, kept separate from the explanation
   async askQuestion(
     extractedText: string,
     question: string,
   ): Promise<string> {
-    try {
-      const response = await this.client.chat.completions.create({
-        
-        model: this.model, 
-        messages: [
-          {
-            role: 'system',
-            content:
-              'You answer questions based on documents. Answer directly, without an introduction or phrases like "Sure".',
-          },
-          {
-            role: 'user',
-            content: `
+    const answer = await this.complete(
+      [
+        {
+          role: 'system',
+          content:
+            'You answer questions based on documents. Answer directly, without an introduction or phrases like "Sure".',
+        },
+        {
+          role: 'user',
+          content: `
 Document text:
 ---
 ${extractedText}
@@ -88,18 +74,10 @@ Question:
 
 Answer clearly and objectively. USE THE LANGUAGE OF THE QUESTION. Maximum 50 words. If the question cannot be answered based on the document, say that the document does not provide enough information to answer the question. 
 `,
-          },
-        ],
-        temperature: 0.1 
-      });
-
-      return stripPreamble(
-        response.choices[0].message.content ?? 'The model returned an empty response.',
-      );
-
-    } catch (error: any) {
-      return `Error processing the question: ${error.message}`;
-      
-    }
+        },
+      ],
+      { temperature: 0.1, maxTokens: 400 },
+    );
+    return stripPreamble(answer || 'The model returned an empty response.');
   }
 }

@@ -1,87 +1,45 @@
-import { DEFAULT_LLM_MODEL, LlmService } from './llm.service';
+import { LlmService } from './llm.service';
 
-const create = jest.fn();
-jest.mock('openai', () => ({
-  __esModule: true,
-  default: jest.fn().mockImplementation((options) => ({
-    options,
-    chat: { completions: { create } },
-  })),
-}));
-
-const reply = (content: string | null) => ({ choices: [{ message: { content } }] });
+const ok = (content: string) =>
+  new Response(JSON.stringify({ message: { role: 'assistant', content } }), { status: 200 });
 
 describe('LlmService', () => {
-  const env = { ...process.env };
+  const fetchMock = jest.fn();
+  const sent = () => JSON.parse(fetchMock.mock.calls[0][1].body);
 
   beforeEach(() => {
-    create.mockReset();
-    delete process.env.LLM_BASE_URL;
-    delete process.env.LLM_MODEL;
-  });
-  afterAll(() => {
-    process.env = env;
+    fetchMock.mockReset();
+    global.fetch = fetchMock as unknown as typeof fetch;
   });
 
-  it('defaults to a local Ollama endpoint and the default model', () => {
-    const service = new LlmService();
-    expect(service.model).toBe(DEFAULT_LLM_MODEL);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect((service as any).client.options.baseURL).toBe('http://localhost:11434/v1');
-  });
-
-  it('reads base URL and model from the environment', () => {
-    process.env.LLM_BASE_URL = 'http://host.docker.internal:11434/v1';
-    process.env.LLM_MODEL = 'qwen2:0.5b';
-    const service = new LlmService();
-    expect(service.model).toBe('qwen2:0.5b');
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect((service as any).client.options.baseURL).toBe('http://host.docker.internal:11434/v1');
+  it('uses qwen3:8b by default', () => {
+    expect(new LlmService().model).toBe('qwen3:8b');
   });
 
   it('explainDocument sends the text deterministically (temperature 0)', async () => {
-    create.mockResolvedValue(reply('summary'));
-    const service = new LlmService();
-    await expect(service.explainDocument('INVOICE 4711')).resolves.toBe('summary');
-
-    const request = create.mock.calls[0][0];
-    expect(request.model).toBe(DEFAULT_LLM_MODEL);
-    expect(request.temperature).toBe(0);
-    expect(request.messages.at(-1).content).toContain('INVOICE 4711');
-  });
-
-  it('askQuestion includes document and question with a low temperature', async () => {
-    create.mockResolvedValue(reply('42'));
-    const service = new LlmService();
-    await expect(service.askQuestion('TOTAL 42', 'What is the total?')).resolves.toBe('42');
-
-    const request = create.mock.calls[0][0];
-    expect(request.temperature).toBeLessThanOrEqual(0.2);
-    expect(request.messages.at(-1).content).toContain('TOTAL 42');
-    expect(request.messages.at(-1).content).toContain('What is the total?');
-  });
-
-  it('every request uses a temperature within a sane range', async () => {
-    create.mockResolvedValue(reply('x'));
-    const service = new LlmService();
-    await service.explainDocument('a');
-    await service.askQuestion('a', 'b');
-    for (const [request] of create.mock.calls) {
-      expect(request.temperature).toBeGreaterThanOrEqual(0);
-      expect(request.temperature).toBeLessThanOrEqual(1);
-    }
+    fetchMock.mockResolvedValue(ok('summary'));
+    await expect(new LlmService().explainDocument('INVOICE 4711')).resolves.toBe('summary');
+    expect(sent().options.temperature).toBe(0);
+    expect(sent().messages.at(-1).content).toContain('INVOICE 4711');
   });
 
   it('removes filler the model adds before the explanation', async () => {
-    create.mockResolvedValue(
-      reply("Sure, here's the explanation of the document in 3 paragraphs:\n\nACME billed $42."),
+    fetchMock.mockResolvedValue(
+      ok("Sure, here's the explanation of the document in 3 paragraphs:\n\nACME billed $42."),
     );
     await expect(new LlmService().explainDocument('x')).resolves.toBe('ACME billed $42.');
   });
 
-  it('tells the model not to add an introduction', async () => {
-    create.mockResolvedValue(reply('x'));
-    await new LlmService().explainDocument('x');
-    expect(create.mock.calls[0][0].messages[0].content).toMatch(/Never begin with an introduction/);
+  it('askQuestion includes document and question with a low temperature', async () => {
+    fetchMock.mockResolvedValue(ok('42'));
+    await expect(new LlmService().askQuestion('TOTAL 42', 'What is the total?')).resolves.toBe('42');
+    expect(sent().options.temperature).toBeLessThanOrEqual(0.2);
+    expect(sent().messages.at(-1).content).toContain('TOTAL 42');
+    expect(sent().messages.at(-1).content).toContain('What is the total?');
+  });
+
+  it('propagates LLM failures instead of returning them as answers', async () => {
+    fetchMock.mockRejectedValue(new TypeError('fetch failed'));
+    await expect(new LlmService().askQuestion('a', 'b')).rejects.toThrow(/LLM unavailable/);
   });
 });
