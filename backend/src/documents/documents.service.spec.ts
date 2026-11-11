@@ -10,6 +10,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { OcrService } from '../ocr/ocr.service';
 import { LlmService } from '../llm/llm.service';
 
+const OWNER = 'alice@example.com';
+
 const baseDoc = {
   id: 'doc-1',
   userId: 'user-1',
@@ -24,7 +26,7 @@ function makePrisma(originalName: string, overrides: Record<string, unknown> = {
   const doc = { ...baseDoc, originalName, ...overrides };
   return {
     document: {
-      findUnique: jest.fn().mockResolvedValue(doc),
+      findFirst: jest.fn().mockResolvedValue(doc),
       update: jest.fn().mockImplementation(({ data }) => Promise.resolve({ ...doc, ...data })),
     },
     llmInteraction: {
@@ -64,14 +66,14 @@ describe('DocumentsService', () => {
 
   it('routes an upper-case .PDF to the PDF pipeline', async () => {
     await build('SCAN.PDF');
-    await service.process('doc-1');
+    await service.process('doc-1', OWNER);
     expect(ocr.recognizePdf).toHaveBeenCalled();
     expect(ocr.extractText).not.toHaveBeenCalled();
   });
 
   it('routes images to image OCR and stores the explanation', async () => {
     await build('photo.JPG');
-    await service.process('doc-1');
+    await service.process('doc-1', OWNER);
     expect(ocr.extractText).toHaveBeenCalled();
     expect(llm.explainDocument).toHaveBeenCalledWith('image text');
     expect(prisma.llmInteraction.create).toHaveBeenCalled();
@@ -79,7 +81,7 @@ describe('DocumentsService', () => {
 
   it('marks unsupported files as FAILED without calling OCR', async () => {
     await build('notes.txt');
-    const result = service.process('doc-1');
+    const result = service.process('doc-1', OWNER);
     await expect(result).rejects.toBeInstanceOf(UnprocessableEntityException);
     await expect(result).rejects.toThrow(/Unsupported file type/);
     expect(ocr.extractText).not.toHaveBeenCalled();
@@ -92,14 +94,14 @@ describe('DocumentsService', () => {
   describe('HTTP errors', () => {
     it('process: 404 for an unknown document', async () => {
       await build('a.png');
-      prisma.document.findUnique.mockResolvedValue(null);
-      await expect(service.process('nope')).rejects.toBeInstanceOf(NotFoundException);
+      prisma.document.findFirst.mockResolvedValue(null);
+      await expect(service.process('nope', OWNER)).rejects.toBeInstanceOf(NotFoundException);
     });
 
     it('process: OCR failure marks FAILED and returns 422', async () => {
       await build('a.png');
       ocr.extractText.mockRejectedValue(new Error('OCR failed for a.png'));
-      await expect(service.process('doc-1')).rejects.toBeInstanceOf(
+      await expect(service.process('doc-1', OWNER)).rejects.toBeInstanceOf(
         UnprocessableEntityException,
       );
       expect(prisma.document.update).toHaveBeenLastCalledWith({
@@ -110,32 +112,70 @@ describe('DocumentsService', () => {
 
     it('ask: 404 for an unknown document', async () => {
       await build('a.png');
-      prisma.document.findUnique.mockResolvedValue(null);
-      await expect(service.ask('nope', 'q?')).rejects.toBeInstanceOf(NotFoundException);
+      prisma.document.findFirst.mockResolvedValue(null);
+      await expect(service.ask('nope', 'q?', OWNER)).rejects.toBeInstanceOf(NotFoundException);
     });
 
     it('ask: 409 while the document is not processed yet', async () => {
       await build('a.png', { status: 'PROCESSING' });
-      await expect(service.ask('doc-1', 'q?')).rejects.toBeInstanceOf(ConflictException);
+      await expect(service.ask('doc-1', 'q?', OWNER)).rejects.toBeInstanceOf(ConflictException);
       expect(llm.askQuestion).not.toHaveBeenCalled();
     });
 
     it('ask: 400 for an empty question', async () => {
       await build('a.png', { status: 'COMPLETED', extractedText: 'text' });
-      await expect(service.ask('doc-1', '   ')).rejects.toBeInstanceOf(BadRequestException);
+      await expect(service.ask('doc-1', '   ', OWNER)).rejects.toBeInstanceOf(BadRequestException);
     });
 
     it('ask: answers a completed document and stores the interaction', async () => {
       await build('a.png', { status: 'COMPLETED', extractedText: 'text' });
-      await service.ask('doc-1', 'What is the total?');
+      await service.ask('doc-1', 'What is the total?', OWNER);
       expect(llm.askQuestion).toHaveBeenCalledWith('text', 'What is the total?');
       expect(prisma.llmInteraction.create).toHaveBeenCalled();
     });
 
     it('findOne: 404 for an unknown document', async () => {
       await build('a.png');
-      prisma.document.findUnique.mockResolvedValue(null);
-      await expect(service.findOne('nope')).rejects.toBeInstanceOf(NotFoundException);
+      prisma.document.findFirst.mockResolvedValue(null);
+      await expect(service.findOne('nope', OWNER)).rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
+
+  describe('ownership', () => {
+    it('only looks documents up among the caller\'s own', async () => {
+      await build('a.png', { status: 'COMPLETED', extractedText: 'text' });
+      await service.findOne('doc-1', OWNER);
+      expect(prisma.document.findFirst).toHaveBeenCalledWith({
+        where: { id: 'doc-1', user: { email: OWNER } },
+      });
+    });
+
+    it('answers 404 (not 403) for another user\'s document', async () => {
+      await build('a.png');
+      prisma.document.findFirst.mockResolvedValue(null);
+      await expect(service.findOne('doc-1', 'mallory@example.com')).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+      await expect(service.ask('doc-1', 'q?', 'mallory@example.com')).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+      await expect(service.process('doc-1', 'mallory@example.com')).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+      expect(ocr.extractText).not.toHaveBeenCalled();
+      expect(llm.askQuestion).not.toHaveBeenCalled();
+    });
+
+    it('does not expose server file paths', async () => {
+      await build('a.png', { status: 'COMPLETED', extractedText: 'text' });
+      const { document } = await service.findOne('doc-1', OWNER);
+      expect(document).not.toHaveProperty('filePath');
+      expect(document).not.toHaveProperty('filename');
+    });
+
+    it('refuses to re-process a document that is already PROCESSING', async () => {
+      await build('a.png', { status: 'PROCESSING' });
+      await expect(service.process('doc-1', OWNER)).rejects.toBeInstanceOf(ConflictException);
     });
   });
 });
