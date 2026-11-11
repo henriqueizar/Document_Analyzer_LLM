@@ -1,0 +1,76 @@
+# Privacidade e LGPD
+
+Este documento descreve, de forma verificável, quais dados a aplicação trata, onde eles
+ficam e o que (não) sai da máquina. Ele é atualizado a cada mudança que afete esses pontos.
+
+> **Importante:** este documento descreve controles técnicos. Ele não é um parecer jurídico
+> e não atesta conformidade com a LGPD (Lei nº 13.709/2018), que também depende de
+> processos da organização que usa a aplicação (base legal, transparência com os titulares,
+> encarregado, etc.).
+
+## Princípio
+
+Durante o uso, a aplicação funciona **inteiramente no computador ou servidor onde está
+instalada**. Documentos, texto extraído, perguntas, respostas e dados pessoais não são
+enviados a serviços externos.
+
+A **instalação** usa a internet uma vez: pacotes npm, imagens Docker e o modelo da LLM
+(`ollama pull`). Depois disso, a aplicação funciona sem internet.
+
+## Inventário de dados
+
+| Dado | Origem | Onde fica | Quem acessa |
+| --- | --- | --- | --- |
+| Arquivos enviados (PDF, imagens) | Upload do usuário | Pasta `backend/uploads/` (disco local) | Somente o dono do documento, pela rota autenticada `GET /documents/:id/file` |
+| Texto extraído (OCR / camada de texto) | Processamento local | PostgreSQL local (`Document.extractedText`) | Somente o dono |
+| Perguntas, respostas e explicações | Usuário / LLM local | PostgreSQL local (`LlmInteraction`) | Somente o dono |
+| E-mail e nome do usuário | Login | PostgreSQL local (`User`) e cookie de sessão | O próprio usuário |
+
+Documentos empresariais frequentemente contêm dados pessoais de terceiros (nomes, CPF,
+endereços, salários). Eles ficam nos mesmos lugares acima.
+
+## Componentes e conexões de rede
+
+| Componente | Roda onde | Conexões externas durante o uso |
+| --- | --- | --- |
+| Frontend (Next.js) | Local | Nenhuma. Telemetria do Next.js desligada nos scripts (`NEXT_TELEMETRY_DISABLED=1`). |
+| Backend (NestJS) | Local | Nenhuma. |
+| OCR (tesseract.js) | Local, no processo do backend | Nenhuma. Os dados de idioma vêm de `backend/eng.traineddata`; se o arquivo faltar, o OCR falha com erro em vez de baixá-lo de um CDN. |
+| Leitura de PDF (pdf-parse) | Local | Nenhuma. |
+| LLM (Ollama) | Local (`OLLAMA_URL`, padrão `http://localhost:11434`) | Nenhuma por parte da aplicação. |
+| Banco (PostgreSQL em Docker) | Local, porta ligada só a `127.0.0.1` | Nenhuma. |
+| Prisma CLI (migrações) | Local | Nenhuma, com `CHECKPOINT_DISABLE=1` no `backend/.env` (padrão do `.env.example`). |
+| **Login com Google** | **Externo** | **Sim: o login passa pelo Google, que recebe o evento de login; a aplicação recebe nome e e-mail. Em remoção (substituído por login local).** |
+
+Fora do escopo da aplicação: o próprio sistema operacional, o Docker Desktop e o app do
+Ollama podem verificar atualizações por conta própria.
+
+## Medidas implementadas
+
+- Processamento de documentos (OCR e LLM) 100% local.
+- Autenticação em todas as rotas de documentos; cada usuário só acessa os próprios
+  documentos (um documento de outra pessoa responde 404, igual a um inexistente).
+- Arquivos enviados não são públicos (não há servidor de arquivos estático).
+- CORS restrito à origem do frontend.
+- Banco e LLM acessíveis apenas em `127.0.0.1` no `docker-compose.yml`.
+- Respostas da LLM restritas ao conteúdo do documento, com citação de página e checagem
+  automática (reduz o risco de informação incorreta sobre titulares).
+
+## O que ainda falta
+
+- Login local (sem Google). *Em andamento.*
+- Exclusão de documentos e dos dados derivados (direito de eliminação, art. 18).
+- Registro de auditoria: quem acessou ou perguntou o quê (registro das operações, art. 37).
+- Permissões por equipe (acesso mínimo necessário).
+- Política de retenção e detecção de dados sensíveis.
+- Para uso em produção: criptografia em repouso (disco / banco), senhas fortes no banco,
+  HTTPS na rede interna e backups.
+
+## Como verificar
+
+1. **Revisão do código:** procure chamadas de rede (`fetch`, `http`, SDKs), telemetria
+   e downloads em tempo de execução.
+2. **Teste sem internet:** com a aplicação instalada, desligue a internet e use-a
+   normalmente (upload, OCR, perguntas).
+3. **Monitor de conexões:** use um firewall de saída (por exemplo, LuLu no macOS) e
+   observe que nenhum processo da aplicação conecta a hosts externos.

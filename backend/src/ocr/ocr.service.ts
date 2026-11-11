@@ -3,12 +3,23 @@ import { createWorker, Worker } from 'tesseract.js';
 import { PDFParse } from 'pdf-parse';
 import * as path from 'path';
 import * as fs from 'fs/promises';
+import { existsSync } from 'fs';
 
 /** Pages whose text layer is shorter than this are treated as scanned and OCR'd. */
 const MIN_TEXT_LAYER_CHARS = 20;
 /** Render scale for OCR of scanned pages (1 = 72 dpi, 2 ≈ 144 dpi). */
 const OCR_RENDER_SCALE = 2;
 const DEFAULT_MAX_PDF_PAGES = 50;
+
+/**
+ * Folder with the Tesseract language data (eng.traineddata). Defaults to the
+ * backend folder, resolved from this file so it does not depend on the
+ * directory the server was started from. The data is never downloaded:
+ * without the file, OCR fails with a clear error instead of fetching it from
+ * a CDN (tesseract.js's default when it cannot find the file).
+ */
+export const TESSDATA_DIR = process.env.TESSDATA_DIR || path.resolve(__dirname, '..', '..');
+const OCR_LANGUAGE = 'eng';
 
 @Injectable()
 export class OcrService {
@@ -70,9 +81,22 @@ export class OcrService {
   }
 
   private createOcrWorker(): Promise<Worker> {
-    // Without an errorHandler, tesseract.js rethrows worker errors outside the
-    // returned promise, which crashes the whole Node process on unreadable input.
-    return createWorker('eng', undefined, { errorHandler: () => undefined });
+    const dataFile = path.join(TESSDATA_DIR, `${OCR_LANGUAGE}.traineddata`);
+    if (!existsSync(dataFile)) {
+      throw new Error(
+        `OCR language data not found at ${dataFile}. It is part of the repository ` +
+          '(backend/eng.traineddata); set TESSDATA_DIR if you moved it. It is never downloaded.',
+      );
+    }
+    return createWorker(OCR_LANGUAGE, undefined, {
+      // Local files only: no CDN download, no cache written to the working directory.
+      langPath: TESSDATA_DIR,
+      gzip: false,
+      cacheMethod: 'none',
+      // Without an errorHandler, tesseract.js rethrows worker errors outside the
+      // returned promise, which crashes the whole Node process on unreadable input.
+      errorHandler: () => undefined,
+    });
   }
 
   private async recognize(
