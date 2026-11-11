@@ -65,6 +65,21 @@ body {
   padding: 32px 16px;
 }
 
+/* Top bar with the back button (nav-bar.tsx), aligned with the column */
+.nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 16px 16px 0;
+}
+.nav a {
+  text-decoration: none;
+  font-weight: 600;
+}
+
 /* Short pages (home, upload): centered both ways, like a card in the middle */
 .centered {
   flex: 1;

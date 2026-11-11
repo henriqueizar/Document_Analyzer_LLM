@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import Providers from './providers';
+import NavBar from './nav-bar';
 
 export const metadata: Metadata = {
   title: "Document LLM Analyzer",
@@ -16,6 +17,7 @@ export default function RootLayout({
     <html lang="en">
       <body>
         <Providers>
+          <NavBar />
           <main className="page">{children}</main>
         </Providers>
       </body>
