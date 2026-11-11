@@ -28,8 +28,8 @@ const ALICE = `alice-${runId}@example.com`;
 const MALLORY = `mallory-${runId}@example.com`;
 
 const llmStub = {
-  explainDocument: jest.fn(async (text: string) => `EXPLANATION OF: ${text.slice(0, 40)}`),
-  askQuestion: jest.fn(async (_text: string, question: string) => `ANSWER TO: ${question}`),
+  explainDocument: jest.fn(async (doc: { text: string }) => `EXPLANATION OF: ${doc.text.slice(0, 40)}`),
+  askQuestion: jest.fn(async (_doc: unknown, question: string) => `ANSWER TO: ${question}`),
 };
 
 function tokenFor(email: string) {

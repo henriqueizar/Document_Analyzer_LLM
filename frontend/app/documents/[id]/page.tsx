@@ -30,6 +30,28 @@ function previewKind(name: string): PreviewKind | null {
   return null;
 }
 
+/**
+ * The backend appends an automatic grounding warning ("⚠ ...") when it could
+ * not verify part of an answer against the document; show it apart.
+ */
+function LlmText({ label, text }: { label: string; text: string }) {
+  const at = text.search(/\n*⚠/u);
+  const body = at === -1 ? text : text.slice(0, at).trimEnd();
+  const warning = at === -1 ? null : text.slice(at).trim();
+  return (
+    <>
+      <p className="llm-text">
+        <strong>{label}</strong> {body}
+      </p>
+      {warning && (
+        <p className="warning" role="note">
+          {warning}
+        </p>
+      )}
+    </>
+  );
+}
+
 async function fetchDocument(id: string): Promise<DocumentData> {
   const res = await apiFetch(`/documents/${id}`);
   if (!res.ok) throw new Error(await errorMessage(res));
@@ -177,9 +199,7 @@ export default function DocumentPage() {
       {interactions
         .filter((i) => i.role === 'EXPLANATION')
         .map((i) => (
-          <p key={i.id} className="llm-text">
-            <strong>Explanation:</strong> {i.answer}
-          </p>
+          <LlmText key={i.id} label="Explanation:" text={i.answer} />
         ))}
 
       <hr />
@@ -192,7 +212,7 @@ export default function DocumentPage() {
       {questions.map((i) => (
         <div key={i.id}>
           <p><strong>You:</strong> {i.question}</p>
-          <p className="llm-text"><strong>LLM:</strong> {i.answer}</p>
+          <LlmText label="LLM:" text={i.answer} />
         </div>
       ))}
 
