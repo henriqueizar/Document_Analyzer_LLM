@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { OcrService } from '../ocr/ocr.service';
 import * as path from 'path';
 import { LlmService } from '../llm/llm.service';
+import { isImage, isPdf } from '../common/supported-files';
 
 @Injectable()
 export class DocumentsService {
@@ -54,10 +55,12 @@ async process(documentId: string) {
 
     let text = '';
 
-    if (document.originalName.endsWith('.pdf')) {
+    if (isPdf(document.originalName)) {
       text = await this.ocrService.recognizePdf(fullPath);
-    } else {
+    } else if (isImage(document.originalName)) {
       text = await this.ocrService.extractText(fullPath);
+    } else {
+      throw new Error(`Unsupported file type: ${document.originalName}`);
     }
 
     // salva o texto extraído

@@ -9,15 +9,21 @@ const pdfParse = require('pdf-parse').default;
 @Injectable()
 export class OcrService {
   async extractText(imagePath: string): Promise<string> {
-    const worker = await createWorker('eng');
-
-    const {
-      data: { text },
-    } = await worker.recognize(imagePath);
-
-    await worker.terminate();
-
-    return text;
+    // Without an errorHandler, tesseract.js rethrows worker errors outside the
+    // returned promise, which crashes the whole Node process on unreadable input.
+    const worker = await createWorker('eng', undefined, {
+      errorHandler: () => undefined,
+    });
+    try {
+      const {
+        data: { text },
+      } = await worker.recognize(imagePath);
+      return text;
+    } catch (error) {
+      throw new Error(`OCR failed for ${path.basename(imagePath)}: ${String(error)}`);
+    } finally {
+      await worker.terminate();
+    }
   }
   async recognizePdf(pdfPath: string): Promise<string> {
     const outputDir = path.join(process.cwd(), 'tmp');
