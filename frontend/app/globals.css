@@ -130,6 +130,11 @@ a {
 small {
   color: #666;
 }
+
+/* LLM output keeps its paragraph breaks */
+.llm-text {
+  white-space: pre-wrap;
+}
 input[type='text'],
 input:not([type]) {
   padding: 8px 12px;

@@ -97,11 +97,12 @@ export default function DocumentPage() {
       )}
 
       {/* Explanation */}
-      <h2><strong>Explanation</strong></h2>
       {interactions
         .filter((i) => i.role === 'EXPLANATION')
         .map((i) => (
-          <p key={i.id}>{i.answer}</p>
+          <p key={i.id} className="llm-text">
+            <strong>Explanation:</strong> {i.answer}
+          </p>
         ))}
 
       <hr />
@@ -113,7 +114,7 @@ export default function DocumentPage() {
         .map((i) => (
           <div key={i.id}>
             <p><strong>You:</strong> {i.question}</p>
-            <p><strong>LLM:</strong> {i.answer}</p>
+            <p className="llm-text"><strong>LLM:</strong> {i.answer}</p>
           </div>
         ))}
 

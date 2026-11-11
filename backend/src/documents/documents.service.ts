@@ -12,6 +12,7 @@ import { OcrService } from '../ocr/ocr.service';
 import * as path from 'path';
 import { LlmService } from '../llm/llm.service';
 import { isImage, isPdf } from '../common/supported-files';
+import { stripPreamble } from '../llm/clean-response';
 
 const MIME_BY_EXTENSION: Record<string, string> = {
   '.pdf': 'application/pdf',
@@ -162,7 +163,8 @@ export class DocumentsService {
 
     return {
       document: this.toPublic(document),
-      interactions,
+      // also cleans explanations stored before filler removal existed
+      interactions: interactions.map((i) => ({ ...i, answer: stripPreamble(i.answer) })),
     };
   }
 
