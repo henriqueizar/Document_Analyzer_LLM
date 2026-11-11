@@ -75,7 +75,7 @@ describe('DocumentsService', () => {
     await build('photo.JPG');
     await service.process('doc-1', OWNER);
     expect(ocr.extractText).toHaveBeenCalled();
-    expect(llm.explainDocument).toHaveBeenCalledWith('image text');
+    expect(llm.explainDocument).toHaveBeenCalledWith({ name: 'photo.JPG', text: 'image text' });
     expect(prisma.llmInteraction.create).toHaveBeenCalled();
   });
 
@@ -130,7 +130,11 @@ describe('DocumentsService', () => {
     it('ask: answers a completed document and stores the interaction', async () => {
       await build('a.png', { status: 'COMPLETED', extractedText: 'text' });
       await service.ask('doc-1', 'What is the total?', OWNER);
-      expect(llm.askQuestion).toHaveBeenCalledWith('text', 'What is the total?');
+      expect(llm.askQuestion).toHaveBeenCalledWith(
+        { name: 'a.png', text: 'text' },
+        'What is the total?',
+        [],
+      );
       expect(prisma.llmInteraction.create).toHaveBeenCalled();
     });
 
@@ -186,5 +190,21 @@ describe('DocumentsService', () => {
     ]);
     const { interactions } = await service.findOne('doc-1', OWNER);
     expect(interactions[0].answer).toBe('It is a receipt.');
+  });
+
+  it('ask sends the last questions as history, oldest first, without warnings', async () => {
+    await build('a.png', { status: 'COMPLETED', extractedText: 'text' });
+    prisma.llmInteraction.findMany.mockResolvedValue([
+      { question: 'q2', answer: 'a2 [p. 1]\n\n⚠ Verificação automática: ...' },
+      { question: 'q1', answer: 'a1 [p. 1]' },
+    ]);
+    await service.ask('doc-1', 'q3', OWNER);
+    expect(prisma.llmInteraction.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { documentId: 'doc-1', role: 'QUESTION' }, take: 3 }),
+    );
+    expect(llm.askQuestion).toHaveBeenCalledWith(expect.anything(), 'q3', [
+      { question: 'q1', answer: 'a1 [p. 1]' },
+      { question: 'q2', answer: 'a2 [p. 1]' },
+    ]);
   });
 });

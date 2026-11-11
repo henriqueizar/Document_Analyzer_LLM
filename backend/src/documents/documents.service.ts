@@ -97,9 +97,10 @@ export class DocumentsService {
       }
 
       // automatic explanation of the document
-      const explanation = await this.llmService.explainDocument(
-        updatedDocument.extractedText,
-      );
+      const explanation = await this.llmService.explainDocument({
+        name: updatedDocument.originalName,
+        text: updatedDocument.extractedText,
+      });
 
       // save the initial LLM interaction
       await this.prisma.llmInteraction.create({
@@ -138,9 +139,21 @@ export class DocumentsService {
       );
     }
 
+    const previous = await this.prisma.llmInteraction.findMany({
+      where: { documentId: document.id, role: 'QUESTION' },
+      orderBy: { createdAt: 'desc' },
+      take: 3,
+    });
+    const history = previous.reverse().map((i) => ({
+      question: i.question,
+      // earlier automatic warnings are for the user, not for the model
+      answer: i.answer.replace(/\n*⚠[^\n]*$/u, '').trim(),
+    }));
+
     const answer = await this.llmService.askQuestion(
-      document.extractedText,
+      { name: document.originalName, text: document.extractedText },
       question,
+      history,
     );
 
     return this.prisma.llmInteraction.create({
