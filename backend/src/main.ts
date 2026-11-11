@@ -1,18 +1,25 @@
 import { NestFactory } from '@nestjs/core';
-import { NestExpressApplication } from '@nestjs/platform-express';
-import { join } from 'path';
 import { AppModule } from './app.module';
+import { getJwtSecret } from './auth/auth.constants';
+
+// Load backend/.env (Node >= 20.12). Real environment variables take precedence.
+try {
+  process.loadEnvFile();
+} catch {
+  // no .env file: rely on the process environment
+}
 
 async function bootstrap() {
-  
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
-  // No seu main.ts
-  app.useStaticAssets(join(process.cwd(), 'uploads'), {
-    prefix: '/uploads', 
-    index: false,       // nao busca index.html
-});
-  app.enableCors();
+  getJwtSecret(); // fail fast when BACKEND_JWT_SECRET is missing or weak
 
-  await app.listen(3000);
+  const app = await NestFactory.create(AppModule);
+
+  // Only the frontend may call the API from a browser.
+  const allowedOrigins = (process.env.FRONTEND_ORIGIN ?? 'http://localhost:3001')
+    .split(',')
+    .map((origin) => origin.trim());
+  app.enableCors({ origin: allowedOrigins });
+
+  await app.listen(Number(process.env.PORT) || 3000);
 }
 bootstrap();

@@ -5,182 +5,169 @@ This README was written with the help of ChatGPT and manually reviewed and adapt
 
 # DOCUMENT LLM ANALYZER
 
+Upload an invoice, receipt or any PDF/image, get an automatic explanation from a
+local LLM, and ask questions about it.
+
 ## Running the project locally
 
 ### Prerequisites
 
-- Node.js (v18+)
+- Node.js 20.12+ (22 LTS recommended)
+- Docker (Docker Desktop on macOS/Windows)
+- [Ollama](https://ollama.com) — on macOS install the native app (`brew install ollama`
+  or the installer); it uses the Apple GPU. Docker on macOS cannot use the GPU.
+- A Google OAuth client (for sign-in)
 
-- Docker and Docker Compose
-
-- Git
-
-- (Optional) ImageMagick or GraphicsMagick for PDF OCR on Windows
+No ImageMagick, GraphicsMagick or Ghostscript is needed: PDFs are read and rendered
+in Node.
 
 ### How to run
 
 1. Clone the repository
-- git clone https://github.com/henriqueizar/Document_Analyzer_LLM
+
+```bash
+git clone https://github.com/henriqueizar/Document_Analyzer_LLM
+```
 
 2. Environment variables
-- Backend (backend/.env) --> [create .env file]
-DATABASE_URL= "postgresql://paggo:paggo@localhost:5432/paggo_db"
-OPENAI_API_KEY= secret_here
 
-NOTE: If OPENAI_API_KEY is not set, the system uses simulated LLM responses.
+```bash
+cp backend/.env.example backend/.env
+cp frontend/.env.example frontend/.env.local
+```
 
-- Frontend (frontend/.env)--> [create .env file]
-NEXTAUTH_URL=http://localhost:3001
-NEXTAUTH_SECRET=secret_here
+Fill in:
 
-GOOGLE_CLIENT_ID= "964289768222-47ert0q6pfh6tcou4ba9hjb6e3fqej73.apps.googleusercontent.com"
-GOOGLE_CLIENT_SECRET=secret_here
+- `BACKEND_JWT_SECRET` — the **same** value in both files (`openssl rand -base64 32`).
+- `NEXTAUTH_SECRET` — another random value (`openssl rand -base64 32`).
+- `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` — from Google Cloud Console. The
+  authorized redirect URI is `http://localhost:3001/api/auth/callback/google`.
 
 3. Start PostgreSQL
-- Open Docker Desktop
-On terminal:
-- cd backend
-- docker compose up -d
 
-4. Backend setup
-- cd backend
-- npm install
-- npx prisma migrate dev
-- npm run start:dev
+```bash
+cd backend
+docker compose up -d
+```
 
+4. Start the LLM
+
+macOS (recommended, uses the GPU):
+
+```bash
+ollama serve        # skip if the Ollama app is already running
+ollama pull gemma:2b
+```
+
+Alternatives:
+
+- Ollama in Docker, CPU only (any OS): `docker compose --profile ollama up -d`, then
+  `docker exec ollama ollama pull gemma:2b`
+- Ollama in Docker with an NVIDIA GPU (Linux, or Windows + WSL2):
+  `docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile ollama up -d`
+
+Use another model with `LLM_MODEL` in `backend/.env`.
+
+5. Backend
+
+```bash
+cd backend
+npm install
+npx prisma migrate dev
+npm run start:dev
+```
 
 Backend runs on http://localhost:3000
 
-5. Frontend setup
-- cd frontend
-- npm install
-- npm run dev
+6. Frontend
 
+```bash
+cd frontend
+npm install
+npm run dev
+```
 
 Frontend runs on http://localhost:3001
 
-6. Usage
+7. Usage
 
-Open http://localhost:3001
+Open http://localhost:3001, sign in with Google, upload a document (PDF or image),
+wait for the automatic explanation, then ask questions. Previous documents and chats
+are under "My documents".
 
-Sign in with Google
+### Tests
 
-Upload a document (image or PDF)
+```bash
+cd backend
+npm test            # unit tests (real OCR on small fixtures, mocked DB/LLM)
+npm run test:e2e    # HTTP flow: upload -> process -> get -> ask; needs `docker compose up -d`
+```
 
-Wait for OCR and automatic explanation
-
-Ask questions about the document
-
-Access previous documents and chat history
-
-- Notes
-
-- - Image OCR works out of the box.
-
-- - PDF OCR on Windows requires ImageMagick or GraphicsMagick.
-
-- - OCR and LLM processing are asynchronous to avoid timeouts.
-
-- - The backend is not suitable for serverless environments.
+The e2e test stubs the LLM, so it does not need Ollama.
 
 ## Development details
 
 ### Architecture
 
-The application is split into two independent services:
+Two independent services:
 
-Frontend: Next.js application responsible for authentication (Google OAuth), file upload UI, document visualization and chat-like interaction.
+- Frontend (http://localhost:3001): Next.js, Google sign-in with NextAuth, upload UI,
+  document view and chat.
+- Backend (http://localhost:3000): NestJS API for OCR, LLM interaction and persistence
+  (Prisma + PostgreSQL in Docker).
 
-Backend: NestJS API responsible for OCR processing, LLM interaction and data persistence.
+PostgreSQL runs in Docker to stay close to production. SQLite was intentionally avoided
+to prevent future migration issues and behavioral differences.
 
-During local development, the services run on different ports:
+During setup, Prisma generated a prisma+postgres connection URL, which is not
+compatible with PostgreSQL running in Docker; a standard PostgreSQL connection string
+is used instead.
 
-Frontend: http://localhost:3000
+### Authentication
 
-Backend: http://localhost:3001
+- Users sign in on the frontend with Google (NextAuth).
+- The frontend route `/api/backend-token` checks the NextAuth session on the server and
+  issues a short-lived (5 min) token signed with `BACKEND_JWT_SECRET`. The browser
+  sends it to the backend as `Authorization: Bearer <token>`.
+- The backend verifies the token on every `/documents` route and only ever returns the
+  caller's own documents (another user's document is a 404).
+- Uploaded files are not public: they are served by `GET /documents/:id/file` to their
+  owner only.
+- Users are created automatically (upsert) on their first upload.
 
-PostgreSQL is used inside a Docker container to simulate an environment closer to production. SQLite was intentionally avoided to prevent future migration issues and behavioral differences.
+### Processing flow
 
-During setup, Prisma automatically generated a prisma+postgres connection URL, which is not compatible with PostgreSQL running in Docker. This caused connection failures until identified. The solution was to switch to a standard PostgreSQL connection string.
-
-### Processing Flow
-
-OCR processing time varies depending on file size and format, so the system processes documents asynchronously to avoid timeouts and connection errors.
-
-Flow:
-
-1. User uploads a document
-
+1. User uploads a document (PDF or image, max 20 MB; other types are rejected with 400)
 2. Document is stored and marked as PENDING
-
-3. OCR runs asynchronously and extracts text
-
-4. Document status is updated to COMPLETED (or FAILED)
-
-5. The extracted text is explained using the LLM
-
+3. `POST /documents/:id/process` extracts the text (PROCESSING)
+4. Status becomes COMPLETED, or FAILED with a 422 and the reason
+5. The extracted text is explained by the LLM
 6. The user can ask questions about the document
+7. All interactions are stored for history
 
-7. All interactions are stored for history and future access
+### Text extraction
 
-This approach prevents issues previously observed, such as request blocking and Error: write EOF.
+- Images: Tesseract.js OCR.
+- PDFs: every page is processed (up to `MAX_PDF_PAGES`, default 50). Pages with an
+  embedded text layer use it directly (fast and exact); scanned pages are rendered in
+  memory and OCR'd. No temporary files are written, so concurrent uploads cannot mix.
 
-### OCR
+### LLM
 
-- Image OCR is fully supported using Tesseract.js
+- Any OpenAI-compatible endpoint; by default local Ollama (`LLM_BASE_URL`,
+  `LLM_MODEL`).
+- Explanations use temperature 0; answers use 0.1.
 
-- PDF OCR works by converting each page to an image and then applying image OCR
+### Deployment notes
 
-- Scanned PDFs require image conversion before OCR
+OCR and LLM processing are CPU/GPU-intensive and long-running, so the backend is not
+suitable for serverless environments such as Vercel Functions.
 
-- On Windows, PDF OCR requires ImageMagick or GraphicsMagick
+## Future improvements
 
-- The PDF OCR pipeline is fully compatible with Linux environments
-
-- PDF OCR Notes
-
-- Although the case focuses on invoice image OCR, the system was designed to support PDFs as well.
-
-- PDF OCR depends on native image processing binaries. If these are not available, the document is safely marked as FAILED without crashing the application. Image OCR continues to work normally.
-
-### LLM Interaction (OpenAI API)
-
-- The LLM integration is fully implemented.
-
-- To keep the system testable without paid API credits, a fallback mechanism is in place:
-
-- - If no API key is provided, a simulated explanation is returned
-
-- - If the OpenAI quota is exceeded, a controlled error message is returned and stored
-
-- This allows the full flow (upload → explanation → Q&A) to be tested end-to-end.
-
-### Authentication (Google OAuth)
-
-- Authentication is handled on the frontend using NextAuth with Google OAuth.
-
-- The backend receives the authenticated user identifier via a custom HTTP header (user-id) for simplicity and statelessness.
-
-- During integration, a foreign key issue was found when creating documents for users that did not yet exist in the database. To solve this, the backend uses an upsert operation on upload, ensuring:
-
-- Users are created automatically on first interaction
-
-- Existing users are reused on subsequent requests
-
-### Deployment Notes
-
-Due to OCR and LLM processing being CPU-intensive and long-running, the backend is not suitable for serverless environments such as Vercel Functions.
-
-## Future Improvements
-
+- Move OCR and LLM processing to a background job queue and poll the status from the
+  frontend (today `/process` is awaited by the upload page).
+- Keep OCR and explanation statuses separate, so an LLM outage does not mark a
+  successfully read document as FAILED.
+- Limit or chunk long documents to fit the model's context window.
 - Improve frontend visual design and overall user experience.
-
-- Add real-time processing status updates during OCR execution.
-
-- Move OCR and LLM processing to a background job queue.
-
-- Support additional document formats and improve OCR post-processing quality.
-For evaluation purposes, the application runs fully in a local environment.
-
-
-

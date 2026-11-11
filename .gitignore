@@ -20,3 +20,6 @@ yarn-debug.log*
 Thumbs.db
 
 uploads/
+
+# Example env files are documentation, not secrets
+!.env.example

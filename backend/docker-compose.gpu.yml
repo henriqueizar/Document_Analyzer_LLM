@@ -1,0 +1,14 @@
+# NVIDIA GPU for the Ollama container (Linux, or Windows with WSL2 + NVIDIA
+# Container Toolkit). Not supported on macOS: Docker Desktop for Mac has no
+# GPU passthrough, so run Ollama natively there instead.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile ollama up -d
+services:
+  ollama:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

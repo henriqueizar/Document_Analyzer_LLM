@@ -3,6 +3,7 @@
 import { useSession } from 'next-auth/react';
 import Link from 'next/link';
 import { useState } from 'react';
+import { apiFetch, errorMessage } from '@/lib/api';
 
 export default function UploadPage() {
   const { data: session, status } = useSession();
@@ -37,34 +38,25 @@ export default function UploadPage() {
   formData.append('file', file);
 
   try {
-    if (!session?.user?.email) {
-      setMessage('User not authenticated.');
-      return;
-    }
-
-    const uploadRes = await fetch('http://localhost:3000/documents/upload', {
+    const uploadRes = await apiFetch('/documents/upload', {
       method: 'POST',
-      headers: {
-        'user-id': session.user.email,
-      },
       body: formData,
     });
-    
-    if (!uploadRes.ok) throw new Error('Upload failed');
+    if (!uploadRes.ok) throw new Error(await errorMessage(uploadRes));
 
     const document = await uploadRes.json();
 
     setdocId(document.id);
 
-    const processRes = await fetch(`http://localhost:3000/documents/${document.id}/process`, {
+    const processRes = await apiFetch(`/documents/${document.id}/process`, {
       method: 'POST',
     });
-    if (!processRes.ok) throw new Error('Processing failed');
-    
+    if (!processRes.ok) throw new Error(await errorMessage(processRes));
+
     setMessage(`Upload successful! Document ID: ${document.id}`);
   } catch (err) {
     console.error(err);
-    setMessage('Error uploading document.');
+    setMessage(`Error: ${err instanceof Error ? err.message : 'upload failed'}`);
   } finally {
     setLoading(false);
   }

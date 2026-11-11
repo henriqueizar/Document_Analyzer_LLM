@@ -3,19 +3,23 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSession } from 'next-auth/react';
+import { apiFetch } from '@/lib/api';
+
+interface DocumentSummary {
+  id: string;
+  originalName: string;
+  status: string;
+  createdAt: string;
+}
 
 export default function DocumentsListPage() {
   const { data: session } = useSession();
-  const [docs, setDocs] = useState<any[]>([]);
+  const [docs, setDocs] = useState<DocumentSummary[]>([]);
 
   useEffect(() => {
   if (!session?.user?.email) return;
 
-  fetch('http://localhost:3000/documents', {
-    headers: {
-      'user-id': session.user.email,
-    },
-  })
+  apiFetch('/documents')
     .then(res => res.json())
     .then(data => {
   const docsArray =
