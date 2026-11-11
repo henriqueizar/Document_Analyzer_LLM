@@ -40,8 +40,10 @@
   border-color: #bbb;
 }
 
-.upload-button:active {
+.upload-button:active,
+.upload-button.dragging {
   background-color: #dcdcdc;
+  border-style: dashed;
 }
 body {
   /* page = optional header + a centered column (see .page in layout.tsx) */
@@ -91,6 +93,14 @@ body {
   gap: 12px;
 }
 
+/* Vertical group of controls, centered, without taking extra height */
+.stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
 /*
  * Tailwind's Preflight (from @import "tailwindcss") resets headings, margins
  * and form controls to plain text. These restore readable defaults for the
@@ -116,6 +126,9 @@ hr {
 }
 a {
   color: inherit;
+}
+small {
+  color: #666;
 }
 input[type='text'],
 input:not([type]) {
