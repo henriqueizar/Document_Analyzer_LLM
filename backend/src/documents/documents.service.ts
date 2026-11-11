@@ -92,7 +92,7 @@ export class DocumentsService {
       });
       if (!updatedDocument.extractedText) {
         throw new UnprocessableEntityException(
-          'No text could be extracted from the document',
+          'No readable text was found in this document. If it is a photo or a scan, try a sharper, well-lit image with the page filling the frame.',
         );
       }
 

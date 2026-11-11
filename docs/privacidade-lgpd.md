@@ -36,7 +36,7 @@ endereços, salários). Eles ficam nos mesmos lugares acima.
 | --- | --- | --- |
 | Frontend (Next.js) | Local | Nenhuma. Telemetria do Next.js desligada nos scripts (`NEXT_TELEMETRY_DISABLED=1`). |
 | Backend (NestJS) | Local | Nenhuma. |
-| OCR (tesseract.js) | Local, no processo do backend | Nenhuma. Os dados de idioma vêm de `backend/eng.traineddata`; se o arquivo faltar, o OCR falha com erro em vez de baixá-lo de um CDN. |
+| OCR (tesseract.js) | Local, no processo do backend | Nenhuma. Os modelos de idioma vêm de `backend/por.traineddata` e `backend/eng.traineddata`; se faltarem, o OCR falha com erro em vez de baixá-los de um CDN. Os decodificadores do leitor de PDF (por exemplo, JPEG 2000) também são arquivos locais do pacote `pdfjs-dist`. |
 | Leitura de PDF (pdf-parse) | Local | Nenhuma. |
 | LLM (Ollama) | Local (`OLLAMA_URL`, padrão `http://localhost:11434`) | Nenhuma por parte da aplicação. |
 | Banco (PostgreSQL em Docker) | Local, porta ligada só a `127.0.0.1` | Nenhuma. |

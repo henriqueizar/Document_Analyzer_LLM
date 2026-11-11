@@ -19,7 +19,29 @@ const DEFAULT_MAX_PDF_PAGES = 50;
  * a CDN (tesseract.js's default when it cannot find the file).
  */
 export const TESSDATA_DIR = process.env.TESSDATA_DIR || path.resolve(__dirname, '..', '..');
-const OCR_LANGUAGE = 'eng';
+/**
+ * Tesseract languages, '+'-separated. Portuguese first: with English only,
+ * accents are lost ("Prestação" -> "Prestacao", "nº" -> "n?"). Each language
+ * needs <lang>.traineddata in TESSDATA_DIR (por and eng are in the repository,
+ * from the tesseract.js-data "4.0.0_best_int" set).
+ */
+const OCR_LANGUAGES = (process.env.OCR_LANGUAGES || 'por+eng').split('+').filter(Boolean);
+
+/**
+ * pdf.js support files shipped with the pdfjs-dist package. Without them pdf.js
+ * cannot decode JPEG 2000 images (common in scanners and "optimized" PDFs) and
+ * renders those pages blank, so OCR finds no text. Local paths only.
+ */
+// Resolved from pdf-parse's location so it is always the copy pdf-parse uses.
+const PDFJS_DIR = path.dirname(
+  require.resolve('pdfjs-dist/package.json', { paths: [path.dirname(require.resolve('pdf-parse'))] }),
+);
+const PDFJS_OPTIONS = {
+  wasmUrl: `${PDFJS_DIR}/wasm/`,
+  standardFontDataUrl: `${PDFJS_DIR}/standard_fonts/`,
+  cMapUrl: `${PDFJS_DIR}/cmaps/`,
+  cMapPacked: true,
+};
 
 @Injectable()
 export class OcrService {
@@ -46,7 +68,7 @@ export class OcrService {
    * written to disk, so concurrent jobs cannot read each other's pages.
    */
   async recognizePdf(pdfPath: string): Promise<string> {
-    const parser = new PDFParse({ data: await fs.readFile(pdfPath) });
+    const parser = new PDFParse({ data: await fs.readFile(pdfPath), ...PDFJS_OPTIONS });
     let worker: Worker | undefined;
     try {
       const { pages, total } = await parser.getText({ first: this.maxPdfPages });
@@ -81,14 +103,16 @@ export class OcrService {
   }
 
   private createOcrWorker(): Promise<Worker> {
-    const dataFile = path.join(TESSDATA_DIR, `${OCR_LANGUAGE}.traineddata`);
-    if (!existsSync(dataFile)) {
-      throw new Error(
-        `OCR language data not found at ${dataFile}. It is part of the repository ` +
-          '(backend/eng.traineddata); set TESSDATA_DIR if you moved it. It is never downloaded.',
-      );
+    for (const lang of OCR_LANGUAGES) {
+      const dataFile = path.join(TESSDATA_DIR, `${lang}.traineddata`);
+      if (!existsSync(dataFile)) {
+        throw new Error(
+          `OCR language data not found at ${dataFile}. por and eng are part of the repository ` +
+            '(backend/*.traineddata); set TESSDATA_DIR if you moved them. It is never downloaded.',
+        );
+      }
     }
-    return createWorker(OCR_LANGUAGE, undefined, {
+    return createWorker(OCR_LANGUAGES, undefined, {
       // Local files only: no CDN download, no cache written to the working directory.
       langPath: TESSDATA_DIR,
       gzip: false,

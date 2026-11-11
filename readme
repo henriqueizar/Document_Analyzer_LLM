@@ -183,7 +183,8 @@ Local accounts only; no external identity provider.
 
 ### Text extraction
 
-- Images: Tesseract.js OCR.
+- Images: Tesseract OCR (tesseract.js 7 / Tesseract 5) with Portuguese and English models
+  (`OCR_LANGUAGES`, default `por+eng`), loaded from `backend/*.traineddata`, never downloaded.
 - PDFs: every page is processed (up to `MAX_PDF_PAGES`, default 50). Pages with an
   embedded text layer use it directly (fast and exact); scanned pages are rendered in
   memory and OCR'd. No temporary files are written, so concurrent uploads cannot mix.

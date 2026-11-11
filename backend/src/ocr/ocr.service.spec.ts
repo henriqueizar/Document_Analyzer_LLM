@@ -9,6 +9,12 @@ jest.setTimeout(60_000);
 describe('OcrService', () => {
   const ocr = new OcrService();
 
+  it('keeps Portuguese accents (por+eng models)', async () => {
+    const text = await ocr.extractText(fixture('acentos.png'));
+    expect(text).toMatch(/Prestação de serviços nº 027/);
+    expect(text).toMatch(/Atenção à rescisão/);
+  });
+
   it('extracts text from an image', async () => {
     const text = await ocr.extractText(fixture('receipt.png'));
     expect(text).toMatch(/RECEIPT TOTAL 42/);
@@ -33,6 +39,12 @@ describe('OcrService', () => {
     it('falls back to OCR for scanned pages without a text layer', async () => {
       const text = await ocr.recognizePdf(fixture('scanned.pdf'));
       expect(text).toMatch(/SCANNED TOTAL 314/);
+    });
+
+    it('reads scans compressed as JPEG 2000 (pdf.js needs its local wasm decoder)', async () => {
+      const text = await ocr.recognizePdf(fixture('scanned-jpeg2000.pdf'));
+      expect(text).toMatch(/CONTRATO DE LOCAÇÃO Nº 15\/2026/);
+      expect(text).toMatch(/R\$ 3\.200,00/);
     });
 
     it('keeps concurrent jobs isolated (no shared temp files)', async () => {
