@@ -1,4 +1,12 @@
-import { Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  HttpException,
+  Injectable,
+  Logger,
+  NotFoundException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { OcrService } from '../ocr/ocr.service';
 import * as path from 'path';
@@ -7,13 +15,17 @@ import { isImage, isPdf } from '../common/supported-files';
 
 @Injectable()
 export class DocumentsService {
+  private readonly logger = new Logger(DocumentsService.name);
+
   constructor(
     private prisma: PrismaService, 
     private ocrService: OcrService,
     private llmService: LlmService) {}
 
   async create(userEmail: string, file: Express.Multer.File) {
-    console.log('EMAIL RECEBIDO:', userEmail);
+    if (!userEmail) {
+      throw new BadRequestException('Missing user identity.');
+    }
     const user = await this.prisma.user.upsert({
       where: { email: userEmail },
       update: {},
@@ -21,7 +33,6 @@ export class DocumentsService {
         email: userEmail,
       }
     });
-    console.log('USER ENCONTRADO:', user);
 
     
     return this.prisma.document.create({
@@ -36,16 +47,14 @@ export class DocumentsService {
   }
 
 async process(documentId: string) {
-  console.log('PROCESS START:', documentId);
+  const document = await this.prisma.document.findUnique({
+    where: { id: documentId },
+  });
+  if (!document) {
+    throw new NotFoundException('Document not found');
+  }
+
   try {
-    const document = await this.prisma.document.findUnique({
-      where: { id: documentId },
-    });
-
-    if (!document) {
-      throw new Error('Document not found');
-    }
-
     await this.prisma.document.update({
       where: { id: documentId },
       data: { status: 'PROCESSING' },
@@ -60,7 +69,9 @@ async process(documentId: string) {
     } else if (isImage(document.originalName)) {
       text = await this.ocrService.extractText(fullPath);
     } else {
-      throw new Error(`Unsupported file type: ${document.originalName}`);
+      throw new UnprocessableEntityException(
+        `Unsupported file type: ${document.originalName}`,
+      );
     }
 
     // salva o texto extraído
@@ -72,7 +83,7 @@ async process(documentId: string) {
       },
     });
     if (!updatedDocument.extractedText) {
-    throw new Error('Extracted text empty after OCR');
+    throw new UnprocessableEntityException('No text could be extracted from the document');
     }
     //explicacao automatica do documento
     const explanation = await this.llmService.explainDocument(
@@ -91,14 +102,17 @@ async process(documentId: string) {
 
     return updatedDocument;
   } catch (error) {
-    console.error('OCR failed:', error);
+    this.logger.error(`Processing failed for document ${documentId}`, error);
 
     await this.prisma.document.update({
       where: { id: documentId },
       data: { status: 'FAILED' },
     });
 
-    throw error;
+    if (error instanceof HttpException) throw error;
+    throw new UnprocessableEntityException(
+      error instanceof Error ? error.message : 'Document processing failed',
+    );
   }
 }
 
@@ -108,8 +122,16 @@ async ask(documentId: string, question: string) {
     where: { id: documentId },
   });
 
-  if (!document || !document.extractedText) {
-    throw new Error('Document not ready for LLM interaction');
+  if (!question?.trim()) {
+    throw new BadRequestException('Question must not be empty');
+  }
+  if (!document) {
+    throw new NotFoundException('Document not found');
+  }
+  if (document.status !== 'COMPLETED' || !document.extractedText) {
+    throw new ConflictException(
+      `Document is not ready for questions (status: ${document.status})`,
+    );
   }
 
   const answer = await this.llmService.askQuestion(
@@ -132,7 +154,7 @@ async findOne(documentId: string) {
   });
 
   if (!document) {
-    throw new Error('Document not found');
+    throw new NotFoundException('Document not found');
   }
 
   const interactions = await this.prisma.llmInteraction.findMany({
@@ -146,6 +168,9 @@ async findOne(documentId: string) {
   };
 }
 async findAllByUser(userEmail: string) {
+  if (!userEmail) {
+    throw new BadRequestException('Missing user identity.');
+  }
   const user = await this.prisma.user.findUnique({
     where: { email: userEmail },
   });

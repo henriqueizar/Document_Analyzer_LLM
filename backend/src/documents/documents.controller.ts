@@ -66,7 +66,6 @@ export class DocumentsController {
 
   @Post(':id/process')
 async process(@Param('id') id: string) {
-  console.log('PROCESSANDO DOCUMENTO');
   await this.documentsService.process(id); 
   return { message: 'Processing completed' };
 }
@@ -82,7 +81,6 @@ async process(@Param('id') id: string) {
 
 @Get(':id')
 async findOne(@Param('id') id: string) {
-  console.log('GET DOCUMENT:', id);
   return this.documentsService.findOne(id);
 }
 @Get()
