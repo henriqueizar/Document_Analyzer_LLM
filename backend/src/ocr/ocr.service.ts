@@ -1,59 +1,92 @@
-import { Injectable } from '@nestjs/common';
-import { createWorker } from 'tesseract.js';
-import { fromPath } from 'pdf2pic';
+import { Injectable, Logger } from '@nestjs/common';
+import { createWorker, Worker } from 'tesseract.js';
+import { PDFParse } from 'pdf-parse';
 import * as path from 'path';
-import * as fs from 'fs';
-//import pdfParse from 'pdf-parse'; //import error
-const pdfParse = require('pdf-parse').default;
+import * as fs from 'fs/promises';
+
+/** Pages whose text layer is shorter than this are treated as scanned and OCR'd. */
+const MIN_TEXT_LAYER_CHARS = 20;
+/** Render scale for OCR of scanned pages (1 = 72 dpi, 2 ≈ 144 dpi). */
+const OCR_RENDER_SCALE = 2;
+const DEFAULT_MAX_PDF_PAGES = 50;
 
 @Injectable()
 export class OcrService {
+  private readonly logger = new Logger(OcrService.name);
+
+  private readonly maxPdfPages =
+    Number(process.env.MAX_PDF_PAGES) || DEFAULT_MAX_PDF_PAGES;
+
+  /** OCR a single image file. */
   async extractText(imagePath: string): Promise<string> {
-    // Without an errorHandler, tesseract.js rethrows worker errors outside the
-    // returned promise, which crashes the whole Node process on unreadable input.
-    const worker = await createWorker('eng', undefined, {
-      errorHandler: () => undefined,
-    });
+    const worker = await this.createOcrWorker();
     try {
-      const {
-        data: { text },
-      } = await worker.recognize(imagePath);
-      return text;
-    } catch (error) {
-      throw new Error(`OCR failed for ${path.basename(imagePath)}: ${String(error)}`);
+      return await this.recognize(worker, imagePath, path.basename(imagePath));
     } finally {
       await worker.terminate();
     }
   }
-  async recognizePdf(pdfPath: string): Promise<string> {
-    const outputDir = path.join(process.cwd(), 'tmp');
 
-    
-    if (!fs.existsSync(outputDir)) {
-      fs.mkdirSync(outputDir);
+  /**
+   * Extract text from every page of a PDF (up to MAX_PDF_PAGES).
+   *
+   * Each page uses its embedded text layer when it has one; pages without a
+   * usable text layer (scans) are rendered in memory and OCR'd. Nothing is
+   * written to disk, so concurrent jobs cannot read each other's pages.
+   */
+  async recognizePdf(pdfPath: string): Promise<string> {
+    const parser = new PDFParse({ data: await fs.readFile(pdfPath) });
+    let worker: Worker | undefined;
+    try {
+      const { pages, total } = await parser.getText({ first: this.maxPdfPages });
+      if (total > this.maxPdfPages) {
+        this.logger.warn(
+          `${path.basename(pdfPath)} has ${total} pages; only the first ${this.maxPdfPages} are processed`,
+        );
+      }
+
+      const texts: string[] = [];
+      for (const page of pages) {
+        let text = page.text.trim();
+        if (text.length < MIN_TEXT_LAYER_CHARS) {
+          worker ??= await this.createOcrWorker();
+          const shot = await parser.getScreenshot({
+            partial: [page.num],
+            scale: OCR_RENDER_SCALE,
+            imageDataUrl: false,
+          });
+          const image = Buffer.from(shot.pages[0].data);
+          text = (
+            await this.recognize(worker, image, `${path.basename(pdfPath)} page ${page.num}`)
+          ).trim();
+        }
+        if (text) texts.push(`--- Page ${page.num} ---\n${text}`);
+      }
+      return texts.join('\n\n');
+    } finally {
+      await worker?.terminate();
+      await parser.destroy();
     }
-    
-    const converter = fromPath(pdfPath, {
-        density: 150,         //diminuição para não sobrecarregar a memoria
-        saveFilename: 'page',
-        savePath: './tmp',
-        format: 'png',
-        width: 1240,
-        height: 1754, 
-    
-});
-    //const pages = await converter.bulk(1, { responseType: 'image' });
-    // para evitar erro de runtime (visto usando bulk),
-    // o convert(e o OCR) processa somente a primeira pagina do PDF
-  
-  const page = await converter(1);
-  if (!page?.path) {
-    throw new Error('Failed to convert PDF page');
   }
 
-  const text = await this.extractText(page.path);
-  fs.unlinkSync(page.path); // limpa a imagem temporaria
+  private createOcrWorker(): Promise<Worker> {
+    // Without an errorHandler, tesseract.js rethrows worker errors outside the
+    // returned promise, which crashes the whole Node process on unreadable input.
+    return createWorker('eng', undefined, { errorHandler: () => undefined });
+  }
 
-    return text.trim();
+  private async recognize(
+    worker: Worker,
+    input: string | Buffer,
+    label: string,
+  ): Promise<string> {
+    try {
+      const {
+        data: { text },
+      } = await worker.recognize(input);
+      return text;
+    } catch (error) {
+      throw new Error(`OCR failed for ${label}: ${String(error)}`);
+    }
   }
 }
