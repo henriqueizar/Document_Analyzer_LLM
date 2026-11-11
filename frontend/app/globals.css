@@ -149,6 +149,28 @@ small {
   height: 70vh;
 }
 
+/* My documents list */
+.title-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.doc-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 12px;
+  padding: 12px;
+  border-bottom: 1px solid #ddd;
+  text-decoration: none;
+}
+.doc-item:hover {
+  background: #fff;
+}
+.doc-item small {
+  grid-column: 1 / -1;
+}
+
 /* Document page: status box, question form, errors */
 .status {
   display: flex;
@@ -196,6 +218,19 @@ button {
 }
 
 button:hover {
+  background: #e5e5e5;
+}
+
+/* Links that look like the buttons (a <button> inside <a> is invalid HTML) */
+.button-link {
+  display: inline-block;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid #ccc;
+  background-color: #f0f0f0;
+  text-decoration: none;
+}
+.button-link:hover {
   background: #e5e5e5;
 }
 

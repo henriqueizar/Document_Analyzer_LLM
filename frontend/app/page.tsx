@@ -25,13 +25,8 @@ export default function Home() {
       <h1>Document LLM Analyzer</h1>
       <p>Logged in as {session.user?.email}</p>
       <div style={{ display: 'flex', gap: 8 }}>
-        <Link href="/upload">
-            <button>Upload document</button>
-        </Link>
-        <Link href="/documents">
-              <button>My documents</button>
-        </Link>
-
+        <Link href="/upload" className="button-link">Upload document</Link>
+        <Link href="/documents" className="button-link">My documents</Link>
       </div>
       <button onClick={() => signOut()}>
         Logout
