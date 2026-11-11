@@ -3,51 +3,74 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSession } from 'next-auth/react';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, errorMessage } from '@/lib/api';
 
 interface DocumentSummary {
   id: string;
   originalName: string;
-  status: string;
+  status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
   createdAt: string;
 }
 
+const STATUS_LABEL: Record<DocumentSummary['status'], string> = {
+  PENDING: 'Not processed',
+  PROCESSING: 'Processing',
+  COMPLETED: 'Ready',
+  FAILED: 'Failed',
+};
+
 export default function DocumentsListPage() {
-  const { data: session } = useSession();
-  const [docs, setDocs] = useState<DocumentSummary[]>([]);
+  const { data: session, status } = useSession();
+  const [docs, setDocs] = useState<DocumentSummary[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
+  const email = session?.user?.email;
   useEffect(() => {
-  if (!session?.user?.email) return;
+    if (!email) return;
+    let cancelled = false;
+    apiFetch('/documents')
+      .then(async (res) => {
+        if (!res.ok) throw new Error(await errorMessage(res));
+        return res.json() as Promise<DocumentSummary[]>;
+      })
+      .then(
+        (list) => !cancelled && setDocs(list),
+        (e: Error) => !cancelled && setError(e.message),
+      );
+    return () => {
+      cancelled = true;
+    };
+  }, [email]);
 
-  apiFetch('/documents')
-    .then(res => res.json())
-    .then(data => {
-  const docsArray =
-    Array.isArray(data) ? data :
-    Array.isArray(data.documents) ? data.documents :
-    Array.isArray(data.data) ? data.data :
-    [];
-
-  setDocs(docsArray);
-});
-}, [session]);
+  if (status === 'loading') return <p>Loading session...</p>;
+  if (!session) {
+    return (
+      <div className="centered">
+        <p>You must be logged in to see your documents.</p>
+        <Link href="/">Go to login</Link>
+      </div>
+    );
+  }
 
   return (
-    <div style={{ maxWidth: 800, margin: 'auto', padding: 24 }}>
-      <h2>My documents</h2>
+    <div>
+      <div className="title-row">
+        <h1>My documents</h1>
+        <Link href="/upload" className="button-link">Upload document</Link>
+      </div>
 
-      {docs.map(doc => (
-        <Link
-          key={doc.id}
-          href={`/documents/${doc.id}`}
-          style={{
-            display: 'block',
-            padding: 12,
-            borderBottom: '1px solid #ddd',
-          }}
-        >
+      {error && <p role="alert" className="error">Error: {error}</p>}
+      {!docs && !error && <p>Loading...</p>}
+      {docs && docs.length === 0 && (
+        <p>
+          No documents yet. <Link href="/upload">Upload your first one</Link>.
+        </p>
+      )}
+
+      {docs?.map((doc) => (
+        <Link key={doc.id} href={`/documents/${doc.id}`} className="doc-item">
           <strong>{doc.originalName}</strong>
-          <div>Status: {doc.status}</div>
+          <span>{STATUS_LABEL[doc.status] ?? doc.status}</span>
           <small>{new Date(doc.createdAt).toLocaleString()}</small>
         </Link>
       ))}

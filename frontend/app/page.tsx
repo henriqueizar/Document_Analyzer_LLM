@@ -6,11 +6,11 @@ import Link from 'next/link';
 export default function Home() {
   const { data: session, status } = useSession();
 
-  if (status === 'loading') return <p>Carregando...</p>;
+  if (status === 'loading') return <p>Loading...</p>;
 
   if (!session) {
     return (
-      <div>
+      <div className="centered">
         <h1>Document LLM Analyzer</h1>
         <h2>You are not logged in</h2>
         <button onClick={() => signIn('google')}>
@@ -21,18 +21,13 @@ export default function Home() {
   }
 
   return (//if logged in
-    <div>
-      <h2>Document LLM Analyzer</h2>
-      <br />
+    <div className="centered">
+      <h1>Document LLM Analyzer</h1>
       <p>Logged in as {session.user?.email}</p>
-      <br />
-      <Link href="/upload">
-            <button>Upload document</button>
-      </Link>
-      <Link href="/documents">
-            <button>My documents</button>
-      </Link>
-      <br /><br />
+      <div style={{ display: 'flex', gap: 8 }}>
+        <Link href="/upload" className="button-link">Upload document</Link>
+        <Link href="/documents" className="button-link">My documents</Link>
+      </div>
       <button onClick={() => signOut()}>
         Logout
       </button>

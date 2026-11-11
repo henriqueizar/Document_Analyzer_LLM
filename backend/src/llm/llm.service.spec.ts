@@ -71,4 +71,17 @@ describe('LlmService', () => {
       expect(request.temperature).toBeLessThanOrEqual(1);
     }
   });
+
+  it('removes filler the model adds before the explanation', async () => {
+    create.mockResolvedValue(
+      reply("Sure, here's the explanation of the document in 3 paragraphs:\n\nACME billed $42."),
+    );
+    await expect(new LlmService().explainDocument('x')).resolves.toBe('ACME billed $42.');
+  });
+
+  it('tells the model not to add an introduction', async () => {
+    create.mockResolvedValue(reply('x'));
+    await new LlmService().explainDocument('x');
+    expect(create.mock.calls[0][0].messages[0].content).toMatch(/Never begin with an introduction/);
+  });
 });

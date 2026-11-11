@@ -178,4 +178,13 @@ describe('DocumentsService', () => {
       await expect(service.process('doc-1', OWNER)).rejects.toBeInstanceOf(ConflictException);
     });
   });
+
+  it('findOne strips filler from explanations stored earlier', async () => {
+    await build('a.png', { status: 'COMPLETED', extractedText: 'text' });
+    prisma.llmInteraction.findMany.mockResolvedValue([
+      { id: 'i1', role: 'EXPLANATION', question: '', answer: "Sure, here's the explanation:\nIt is a receipt." },
+    ]);
+    const { interactions } = await service.findOne('doc-1', OWNER);
+    expect(interactions[0].answer).toBe('It is a receipt.');
+  });
 });

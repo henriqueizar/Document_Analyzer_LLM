@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import OpenAI from 'openai';
+import { stripPreamble } from './clean-response';
 
 /** OpenAI-compatible endpoint. Default: Ollama running natively on the host. */
 export const DEFAULT_LLM_BASE_URL = 'http://localhost:11434/v1';
@@ -30,7 +31,9 @@ export class LlmService {
       messages: [
         {
           role: 'system',
-          content: 'You are an assistant that explains documents objectively, maximum of 3 paragraphs. Use the language of the document in your explanation.',
+          content:
+            'You explain documents objectively in at most 3 paragraphs, in the language of the document. ' +
+            'Start directly with the content. Never begin with an introduction, a heading, or phrases like "Sure" or "Here is".',
         },
         {
           role: 'user',
@@ -46,7 +49,7 @@ ${extractedText}
       temperature: 0.0
     });
 
-    return response.choices[0].message.content ?? '';
+    return stripPreamble(response.choices[0].message.content ?? '');
   }
  catch (error: any) {
     if (error.status === 429){ 
@@ -69,7 +72,8 @@ ${extractedText}
         messages: [
           {
             role: 'system',
-            content: 'You are an assistant that answers questions based on documents.',
+            content:
+              'You answer questions based on documents. Answer directly, without an introduction or phrases like "Sure".',
           },
           {
             role: 'user',
@@ -89,7 +93,9 @@ Answer clearly and objectively. USE THE LANGUAGE OF THE QUESTION. Maximum 50 wor
         temperature: 0.1 
       });
 
-      return response.choices[0].message.content ?? 'The model returned an empty response.';
+      return stripPreamble(
+        response.choices[0].message.content ?? 'The model returned an empty response.',
+      );
 
     } catch (error: any) {
       return `Error processing the question: ${error.message}`;
