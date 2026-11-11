@@ -1,4 +1,7 @@
 import type { Metadata } from "next";
+// Terminal font, bundled and served by this app (no external font service).
+import "@fontsource/vt323/latin.css";
+import "@fontsource/vt323/latin-ext.css";
 import "./globals.css";
 import Providers from './providers';
 import NavBar from './nav-bar';

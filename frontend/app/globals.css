@@ -1,59 +1,38 @@
-
 @import "tailwindcss";
 
+/*
+ * Visual identity: an old machine terminal. Square corners, 1px black lines,
+ * no shadows or rounded "cards", inverted colours for hover/selection, and the
+ * VT323 font (a DEC VT320 terminal font, self-hosted from @fontsource/vt323 in
+ * layout.tsx: no external font service).
+ */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --paper: #f7f7f7;
+  --ink: #111;
+  --muted: #555;
+  --line: #111;
+  --soft-line: #999;
+  --button: #e4e4e4;
+  --amber: #fff1c2;
+  --amber-ink: #5c3b00;
+  --error: #b00020;
+  --ok: #1b6e2d;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+* {
+  border-radius: 0;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
-.upload-button {
-  padding: 8px 12px;
-  border-radius: 6px;
-  border: 1px solid #ccc;
-  cursor: pointer;
-
-  
-  display: inline-block;
-  text-align: center;
-  background-color: #f0f0f0; 
-  color: black;
-  line-height: normal;
-  user-select: none;
-}
-
-.upload-button:hover {
-  background-color: #e5e5e5;
-  border-color: #bbb;
-}
-
-.upload-button:active,
-.upload-button.dragging {
-  background-color: #dcdcdc;
-  border-style: dashed;
-}
 body {
   /* page = optional header + a centered column (see .page in layout.tsx) */
   display: flex;
   flex-direction: column;
   min-height: 100vh;
-  font-size: larger;
-  font-family: monospace;
-  background: #f7f7f7;
-  color: #111;
+  font-family: 'VT323', monospace;
+  font-size: 22px;
+  line-height: 1.25;
+  background: var(--paper);
+  color: var(--ink);
 }
 
 /* Centered content column used by every page */
@@ -79,10 +58,11 @@ body {
 }
 .nav a {
   text-decoration: none;
-  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
 }
 
-/* Short pages (home, upload): centered both ways, like a card in the middle */
+/* Short pages (home, upload): centered both ways */
 .centered {
   flex: 1;
   display: flex;
@@ -103,33 +83,176 @@ body {
 
 /*
  * Tailwind's Preflight (from @import "tailwindcss") resets headings, margins
- * and form controls to plain text. These restore readable defaults for the
- * plain HTML tags the pages use.
+ * and form controls to plain text. VT323 has a single weight: headings get
+ * their hierarchy from size and capitals.
  */
 h1 {
-  font-size: 1.6em;
-  font-weight: 700;
+  font-size: 1.7em;
+  font-weight: normal;
+  text-transform: uppercase;
+  letter-spacing: 1px;
   margin-bottom: 16px;
 }
 h2 {
-  font-size: 1.2em;
-  font-weight: 600;
+  font-size: 1.3em;
+  font-weight: normal;
+  text-transform: uppercase;
+  letter-spacing: 1px;
   margin: 24px 0 12px;
 }
+h3 {
+  font-size: 1.1em;
+  font-weight: normal;
+  text-transform: uppercase;
+}
+strong {
+  /* synthesized bold reads well in VT323; underline would look like a link */
+  font-weight: bold;
+}
 p {
-  line-height: 1.5;
   margin-bottom: 8px;
 }
 hr {
   margin: 24px 0;
-  border-color: #ddd;
+  border: 0;
+  border-top: 1px dashed var(--soft-line);
 }
 a {
   color: inherit;
 }
 small {
-  color: #666;
+  color: var(--muted);
+  font-size: 0.85em;
 }
+:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+/* --- Controls ------------------------------------------------------------ */
+
+button,
+.button-link,
+.upload-button {
+  display: inline-block;
+  padding: 4px 14px;
+  border: 1px solid var(--line);
+  background: var(--button);
+  color: var(--ink);
+  font: inherit;
+  text-decoration: none;
+  cursor: pointer;
+  user-select: none;
+}
+button:hover:not(:disabled),
+.button-link:hover,
+.upload-button:hover,
+.upload-button.dragging {
+  background: var(--ink);
+  color: var(--paper);
+}
+.upload-button.dragging {
+  border-style: dashed;
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+button.primary {
+  margin-top: 8px;
+  padding: 6px 18px;
+  border-width: 2px;
+}
+button.toggle[aria-pressed='true'] {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+input[type='text'],
+input[type='email'],
+input[type='password'],
+input:not([type]),
+select,
+textarea {
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+}
+
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+.button-row.left {
+  justify-content: flex-start;
+}
+
+/* Forms: label above field, one column */
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  max-width: 420px;
+  text-align: left;
+}
+.form label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-transform: uppercase;
+}
+.form label small {
+  text-transform: none;
+}
+.form label input,
+.form label select {
+  text-transform: none;
+}
+.form button[type='submit'] {
+  align-self: flex-start;
+}
+.centered .form button[type='submit'] {
+  align-self: stretch;
+}
+.hint {
+  max-width: 420px;
+}
+.inline-form {
+  display: flex;
+  gap: 8px;
+}
+
+/* Messages */
+.error {
+  color: var(--error);
+}
+.success {
+  color: var(--ok);
+}
+
+/* Labels next to names: [ADMINISTRATOR] */
+.badge {
+  margin-left: 8px;
+  font-size: 0.85em;
+  text-transform: uppercase;
+}
+.badge::before {
+  content: '[';
+}
+.badge::after {
+  content: ']';
+}
+.badge-warn {
+  color: var(--amber-ink);
+  background: var(--amber);
+}
+
+/* --- Pages ---------------------------------------------------------------- */
 
 /* Document preview (image or PDF) on the document page */
 .preview {
@@ -141,8 +264,7 @@ small {
 .preview img,
 .preview iframe {
   width: 100%;
-  border: 1px solid #ddd;
-  border-radius: 8px;
+  border: 1px solid var(--line);
   background: #fff;
 }
 .preview iframe {
@@ -159,29 +281,31 @@ small {
 .doc-item {
   display: grid;
   grid-template-columns: 1fr auto;
-  gap: 2px 12px;
-  padding: 12px;
-  border-bottom: 1px solid #ddd;
+  gap: 0 12px;
+  padding: 8px 12px;
+  border-bottom: 1px dashed var(--soft-line);
   text-decoration: none;
 }
 .doc-item:hover {
-  background: #fff;
+  background: var(--ink);
+  color: var(--paper);
+}
+.doc-item:hover small {
+  color: var(--paper);
 }
 .doc-item small {
   grid-column: 1 / -1;
 }
 
-/* Document page: status box, question form, errors */
+/* Document page: status box, question form, LLM text */
 .status {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 12px 16px;
+  padding: 8px 12px;
   margin-bottom: 24px;
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  background: #fff;
+  border: 1px solid var(--line);
 }
 .status p {
   margin: 0;
@@ -193,127 +317,27 @@ small {
 .ask-form input {
   flex: 1;
 }
-.error {
-  color: crimson;
-}
-
 /* LLM output keeps its paragraph breaks */
 .llm-text {
   white-space: pre-wrap;
 }
-
 /* Automatic grounding warning appended by the backend */
 .warning {
-  padding: 8px 12px;
-  border-left: 3px solid #b26b00;
-  background: #fff7e6;
-  color: #5c3b00;
-  font-size: 0.9em;
-}
-input[type='text'],
-input[type='email'],
-input[type='password'],
-input:not([type]),
-select {
-  padding: 8px 12px;
-  border-radius: 6px;
-  border: 1px solid #ccc;
-  background: #fff;
-}
-
-button {
-  padding: 8px 12px;
-  border-radius: 6px;
-  border: 1px solid #ccc;
-  background-color: #f0f0f0;
-  cursor: pointer;
-}
-
-button:hover {
-  background: #e5e5e5;
-}
-
-/* Links that look like the buttons (a <button> inside <a> is invalid HTML) */
-.button-link {
-  display: inline-block;
-  padding: 8px 12px;
-  border-radius: 6px;
-  border: 1px solid #ccc;
-  background-color: #f0f0f0;
-  text-decoration: none;
-}
-.button-link:hover {
-  background: #e5e5e5;
-}
-
-button:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-/* Forms: label above field, one column */
-.form {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  width: 100%;
-  max-width: 400px;
-  text-align: left;
-}
-.form label {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-weight: 600;
-}
-.form label small {
-  font-weight: 400;
-}
-.form button[type='submit'] {
-  align-self: flex-start;
-}
-.centered .form button[type='submit'] {
-  align-self: stretch;
-}
-.hint {
-  max-width: 400px;
-}
-.success {
-  color: #1b6e2d;
-}
-
-/* Small labels next to names */
-.badge {
-  display: inline-block;
-  margin-left: 8px;
-  padding: 1px 6px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  font-size: 0.75em;
-  background: #fff;
-}
-.badge-warn {
-  border-color: #b26b00;
-  color: #5c3b00;
-  background: #fff7e6;
-}
-
-.button-row {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 8px;
+  padding: 6px 12px;
+  border: 1px dashed var(--amber-ink);
+  background: var(--amber);
+  color: var(--amber-ink);
 }
 
 /* Account details */
 .details {
   display: grid;
   grid-template-columns: max-content 1fr;
-  gap: 4px 16px;
+  gap: 0 16px;
   margin-bottom: 8px;
 }
 .details dt {
-  font-weight: 600;
+  text-transform: uppercase;
 }
 
 /* Users list */
@@ -323,80 +347,49 @@ button:disabled {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 12px 0;
-  border-bottom: 1px solid #ddd;
+  padding: 10px 0;
+  border-bottom: 1px dashed var(--soft-line);
 }
 .user-row > p {
   flex-basis: 100%;
   margin: 0;
-}
-.inline-form {
-  display: flex;
-  gap: 8px;
 }
 
 /* Footer with the privacy link, on every page */
 .footer {
   padding: 12px 16px 20px;
   text-align: center;
-  font-size: 0.8em;
-  color: #666;
+  font-size: 0.85em;
+  color: var(--muted);
 }
 
 /* Privacy notice */
 .privacy ul {
-  list-style: disc;
-  padding-left: 24px;
+  list-style: none;
   margin-bottom: 8px;
 }
-.privacy li {
-  margin-bottom: 4px;
+.privacy li::before {
+  content: '> ';
 }
 .privacy code {
-  /* inherit: a bare monospace font-family makes browsers use a larger default size */
-  font-family: inherit;
   padding: 0 4px;
+  border: 1px solid var(--line);
   background: #fff;
-  border: 1px solid #ddd;
-  border-radius: 4px;
+  font-family: inherit;
 }
 .check {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 8px;
-  padding: 16px;
+  padding: 12px 16px;
   margin-bottom: 16px;
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  background: #fff;
-}
-.check h3 {
-  font-weight: 700;
+  border: 1px solid var(--line);
 }
 .check p {
   margin: 0;
 }
 .check textarea {
   width: 100%;
-  padding: 8px;
-  border: 1px solid #ccc;
-  border-radius: 6px;
-  font: inherit;
   font-size: 0.85em;
-  background: #f7f7f7;
-}
-.button-row.left {
-  justify-content: flex-start;
-}
-button.primary {
-  margin-top: 8px;
-  padding: 10px 16px;
-  font-weight: 700;
-  border-color: #111;
-}
-button.toggle[aria-pressed='true'] {
-  background: #111;
-  border-color: #111;
-  color: #fff;
 }
