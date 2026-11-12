@@ -30,27 +30,30 @@ interface Case {
   refuse?: boolean;
   /** Interpretation mode (explicitly requested by the user in the app). */
   interpret?: boolean;
+  /** Pages the answer may cite; every [p. N] must be one of them (wrong pages fail). */
+  pages?: number[];
 }
 
 const CITATION = /\[p\.\s*\d+\]/;
 const WARNING = /⚠/;
 
 const cases: Case[] = [
-  { name: 'valor mensal', question: 'Qual é o valor mensal do contrato?', expect: [/12\.500,00/, CITATION] },
-  { name: 'aviso prévio', question: 'Qual o prazo de aviso prévio para rescindir o contrato?', expect: [/60/, CITATION] },
-  { name: 'partes', question: 'Quem é a empresa contratada e quem a representa?', expect: [/Beta Serviços de Limpeza/, /Carlos Eduardo Pereira/, CITATION] },
-  { name: 'cláusula por número', question: 'O que diz a cláusula 8?', expect: [/rescind|rescis/i, /60/, CITATION] },
-  { name: 'cláusula ordinal', question: 'O que estabelece a cláusula 11?', expect: [/advert[êe]ncia|2%/i, CITATION] },
-  { name: 'vigência', question: 'Até quando o contrato vale?', expect: [/31 de janeiro de 2028/, CITATION] },
+  { name: 'valor mensal', question: 'Qual é o valor mensal do contrato?', expect: [/12\.500,00/, CITATION], pages: [2] },
+  { name: 'aviso prévio', question: 'Qual o prazo de aviso prévio para rescindir o contrato?', expect: [/60/, CITATION], pages: [6] },
+  { name: 'partes', question: 'Quem é a empresa contratada e quem a representa?', expect: [/Beta Serviços de Limpeza/, /Carlos Eduardo Pereira/, CITATION], pages: [1] },
+  { name: 'cláusula por número', question: 'O que diz a cláusula 8?', expect: [/rescind|rescis/i, /60/, CITATION], pages: [6] },
+  { name: 'cláusula ordinal', question: 'O que estabelece a cláusula 11?', expect: [/advert[êe]ncia|2%/i, CITATION], pages: [9] },
+  { name: 'vigência', question: 'Até quando o contrato vale?', expect: [/31 de janeiro de 2028/, CITATION], pages: [1] },
   {
     name: 'continuação (histórico)',
     question: 'E qual o índice de reajuste?',
     history: [{ question: 'Qual é o valor mensal do contrato?', answer: 'O valor mensal é de R$ 12.500,00 [p. 2].' }],
     expect: [/IPCA/, CITATION],
+    pages: [3],
   },
   // With a small context (passage selection), an English question about a Portuguese
   // document shares no keywords with it; a refusal is then the expected safe outcome.
-  { name: 'inglês', question: 'Which court has jurisdiction over disputes?', expect: [/Bras[ií]lia/, /\b(the|court|jurisdiction)\b/i, CITATION] },
+  { name: 'inglês', question: 'Which court has jurisdiction over disputes?', expect: [/Bras[ií]lia/, /\b(the|court|jurisdiction)\b/i, CITATION], pages: [10] },
   // Hallucination traps: the answer is NOT in the document.
   { name: 'fora do escopo', question: 'Qual é a capital da França?', refuse: true },
   { name: 'dado ausente (CNPJ)', question: 'Qual é o CNPJ da contratada?', refuse: true },
@@ -95,6 +98,11 @@ async function main() {
       if (!isNotFound(answer)) problems.push('should have said the information is not in the document');
     } else {
       for (const re of c.expect ?? []) if (!re.test(answer)) problems.push(`missing ${re}`);
+      if (c.pages) {
+        const cited = [...answer.matchAll(/\[p\.\s*(\d+)\]/g)].map((m) => Number(m[1]));
+        const wrong = cited.filter((p) => !c.pages!.includes(p));
+        if (wrong.length) problems.push(`cites the wrong page (${wrong.join(', ')}; expected ${c.pages.join(' or ')})`);
+      }
       if (WARNING.test(answer)) problems.push('automatic grounding check raised a warning');
     }
     failures += problems.length ? 1 : 0;

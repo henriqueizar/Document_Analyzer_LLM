@@ -1,4 +1,4 @@
-import { checkGrounding, isNotFound } from './grounding';
+import { checkGrounding, isNegativeOnly, isNotFound } from './grounding';
 
 const source = { text: '[p. 2]\nO valor mensal é de R$ 12.500,00, reajuste de 4,5% em 01/03/2027.', pages: [2] };
 const check = (answer: string, requireCitation = true) =>
@@ -31,5 +31,25 @@ describe('checkGrounding', () => {
 
   it('ignores single digits (e.g. "3 parágrafos")', () => {
     expect(check('Há 3 condições [p. 2].').ok).toBe(true);
+  });
+});
+
+describe('isNegativeOnly', () => {
+  it.each([
+    'A multa por atraso no pagamento não está explicitamente mencionada no documento. [p. 4]',
+    'O documento não informa o CNPJ da contratada.',
+    'Não há menção a seguro no contrato.',
+    'The late payment fine is not specified in the document. [p. 4]',
+    'The document does not mention an insurance.',
+  ])('recognises a refusal in other words: %s', (answer) => {
+    expect(isNegativeOnly(answer)).toBe(true);
+  });
+
+  it.each([
+    'O valor mensal é de R$ 12.500,00 [p. 2].',
+    'O valor mensal é de R$ 12.500,00 [p. 2]. O documento não informa o CNPJ.',
+    'A cláusula não prevista em lei foi anulada [p. 3].',
+  ])('keeps answers that state a fact: %s', (answer) => {
+    expect(isNegativeOnly(answer)).toBe(false);
   });
 });

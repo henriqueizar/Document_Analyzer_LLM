@@ -12,7 +12,7 @@ import {
   partialExplanationNote,
   Turn,
 } from './prompts';
-import { checkGrounding, groundingWarning, hasCitation, isNotFound } from './grounding';
+import { checkGrounding, groundingWarning, hasCitation, isNegativeOnly, isNotFound } from './grounding';
 import { attributeCitations, Source } from './citations';
 
 export { DEFAULT_LLM_MODEL } from './ollama.client';
@@ -122,6 +122,9 @@ export class LlmService {
     // -> just the standard sentence. Answers that cite pages carry real content
     // (e.g. one part found, another not) and are kept as they are.
     if (isNotFound(answer) && !hasCitation(answer)) return { text: NOT_FOUND[lang], sources };
+    // A refusal in the model's own words ("... não está mencionada no documento. [p. 4]")
+    // is shown as the standard sentence, without a misleading page.
+    if (isNegativeOnly(answer)) return { text: NOT_FOUND[lang], sources };
 
     // Cite, by code, sentences that clearly come from a passage.
     const cited = attributeCitations(answer, sources);

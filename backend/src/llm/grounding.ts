@@ -17,6 +17,31 @@ export function hasCitation(text: string): boolean {
   return new RegExp(CITATION.source, 'i').test(text);
 }
 
+/**
+ * Refusals the model words its own way ("A multa ... não está explicitamente
+ * mencionada no documento. [p. 4]"). Such an answer states only an absence,
+ * so a page citation there is misleading.
+ */
+const NEGATIVE = [
+  // (\b does not see accented letters such as the "á" of "está", hence the explicit spaces)
+  /\bn[ãa]o\s(?:[^.]{0,60}\s)?(?:est[áa]|é|s[ãa]o|foi|foram|h[áa])\s[^.]{0,40}\b(?:mencionad|especificad|informad|previst|indicad|descrit|citad|definid|estabelecid|presente|dispon[íi]ve|claro|clara)/i,
+  /\b(?:o|este|esse) documento n[ãa]o (?:menciona|informa|especifica|prev[êe]|traz|cita|define|estabelece|apresenta|cont[ée]m|diz|indica|fala)/i,
+  /\bn[ãa]o (?:h[áa]|existe|consta|constam) (?:men[çc][ãa]o|informa[çc][ãa]o|refer[êe]ncia|cl[áa]usula|previs[ãa]o)/i,
+  /\bnot (?:explicitly )?(?:mentioned|specified|stated|provided|included|defined|given|addressed)\b/i,
+  /\bthe document does(?: not|n't) (?:mention|specify|state|provide|include|define|say|address)/i,
+  /\bthere is no (?:mention|information|reference|clause|provision)\b/i,
+];
+
+/** True when every sentence of the answer only says something is absent from the document. */
+export function isNegativeOnly(answer: string): boolean {
+  const sentences = answer
+    .replace(CITATION, '')
+    .split(/(?<=[.!?])\s+/)
+    .map((x) => x.trim())
+    .filter(Boolean);
+  return sentences.length > 0 && sentences.every((x) => NEGATIVE.some((re) => re.test(x)));
+}
+
 export function isNotFound(answer: string): boolean {
   const a = normalize(answer);
   return Object.values(NOT_FOUND).some((phrase) =>

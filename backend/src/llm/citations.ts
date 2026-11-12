@@ -37,8 +37,11 @@ const MIN_SHARED_WORDS = 3;
  * Deterministic: no model involved.
  */
 export function attributeCitations(text: string, sources: Source[]): string {
+  // "[p. 6].Em caso" -> "[p. 6]. Em caso" (models sometimes drop the space)
+  text = text.replace(/(\[\s*p\.?\s*\d+\s*\])([.;,:])(?=\p{L})/gu, '$1$2 ');
   if (!sources.length) return text;
   const sourceTokens = sources.map((s) => new Set(stems(s.text)));
+  const pageTokens = tokensByPage(sources);
 
   return text
     .split(/(\n\s*\n)/)
@@ -48,17 +51,65 @@ export function attributeCitations(text: string, sources: Source[]): string {
       return paragraph
         .split(SENTENCE_END)
         .map((sentence) =>
-          CITATION.test(sentence)
-            ? sentence
-            : // items of a list joined by ";" often come from different pages
-              sentence
-                .split(/;\s+/)
-                .map((item) => cite(item, sources, sourceTokens))
-                .join('; '),
+          // items of a list joined by ";" often come from different pages
+          sentence
+            .split(/;\s+/)
+            .map((item) =>
+              CITATION.test(item) ? verify(item, pageTokens) : cite(item, sources, sourceTokens),
+            )
+            .join('; '),
         )
         .join(' ');
     })
     .join('');
+}
+
+/** Words of every page, so a citation can be checked against the whole page it names. */
+function tokensByPage(sources: Source[]): Map<number, Set<string>> {
+  const pages = new Map<number, Set<string>>();
+  for (const s of sources) {
+    const set = pages.get(s.page) ?? new Set<string>();
+    for (const t of stems(s.text)) set.add(t);
+    pages.set(s.page, set);
+  }
+  return pages;
+}
+
+const WEAK_SUPPORT = 0.35;
+const CLEAR_MARGIN = 0.25;
+
+/**
+ * Checks a sentence that carries one citation. Models sometimes cite a page
+ * that was sent but says something else (seen: "... pelo IPCA [p. 4]" while
+ * the IPCA clause is on page 3). When the cited page shares few of the
+ * sentence's words and another page clearly backs it, the page number is
+ * corrected. Anything less clear is left as the model wrote it.
+ */
+function verify(sentence: string, pageTokens: Map<number, Set<string>>): string {
+  const cites = [...sentence.matchAll(/\[\s*p\.?\s*(\d+)\s*\]/gi)];
+  if (cites.length !== 1) return sentence;
+  const cited = Number(cites[0][1]);
+  const words = [...new Set(stems(sentence.replace(cites[0][0], '')))];
+  if (words.length < MIN_SHARED_WORDS) return sentence;
+
+  const support = (page: number) => {
+    const tokens = pageTokens.get(page);
+    return tokens ? words.filter((w) => tokens.has(w)).length / words.length : 0;
+  };
+  let bestPage = cited;
+  let best = support(cited);
+  for (const page of pageTokens.keys()) {
+    const score = support(page);
+    if (score > best) {
+      best = score;
+      bestPage = page;
+    }
+  }
+  const citedSupport = support(cited);
+  if (bestPage !== cited && citedSupport < WEAK_SUPPORT && best >= MIN_SHARE && best - citedSupport >= CLEAR_MARGIN) {
+    return sentence.replace(cites[0][0], `[p. ${bestPage}]`);
+  }
+  return sentence;
 }
 
 function cite(sentence: string, sources: Source[], sourceTokens: Set<string>[]): string {

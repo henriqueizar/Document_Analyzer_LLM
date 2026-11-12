@@ -65,4 +65,34 @@ describe('attributeCitations', () => {
     expect(result).toMatch(/60 dias de aviso \[p\. 6\]\.$/);
     expect(result).not.toMatch(/\] \[p\./);
   });
+
+  describe('verification of citations written by the model', () => {
+    const pages: Source[] = [
+      { page: 3, text: 'CLÁUSULA QUINTA - DO REAJUSTE. O valor mensal será reajustado anualmente, na data de aniversário do contrato, pela variação acumulada do IPCA nos 12 (doze) meses anteriores.' },
+      { page: 4, text: 'CLÁUSULA SEXTA - DAS OBRIGAÇÕES DA CONTRATADA. A CONTRATADA deverá manter no local, no mínimo, 4 (quatro) profissionais uniformizados.' },
+    ];
+
+    it('corrects a page that does not back the sentence when another clearly does (real qwen3:8b output)', () => {
+      const text =
+        'O valor mensal será reajustado anualmente, na data de aniversário do contrato, pela variação acumulada do IPCA nos 12 (doze) meses anteriores [p. 4].';
+      expect(attributeCitations(text, pages)).toBe(text.replace('[p. 4]', '[p. 3]'));
+    });
+
+    it('keeps a correct citation', () => {
+      const text = 'A CONTRATADA deve manter no mínimo quatro profissionais uniformizados [p. 4].';
+      expect(attributeCitations(text, pages)).toBe(text);
+    });
+
+    it('leaves unclear cases as written (no page clearly better)', () => {
+      const text = 'O contrato tem regras gerais [p. 4].';
+      expect(attributeCitations(text, pages)).toBe(text);
+    });
+  });
+
+  it('restores the space the model dropped after a cited sentence (real qwen3:8b output)', () => {
+    const text = 'Aviso prévio de 60 (sessenta) dias [p. 6].Em caso de descumprimento, rescisão imediata [p. 6].';
+    expect(attributeCitations(text, [])).toBe(
+      'Aviso prévio de 60 (sessenta) dias [p. 6]. Em caso de descumprimento, rescisão imediata [p. 6].',
+    );
+  });
 });
