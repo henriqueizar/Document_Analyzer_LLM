@@ -15,6 +15,7 @@ import { ProcessingService } from './processing.service';
 import type { AnswerMode } from '../llm/prompts';
 import { repairMisdecodedName } from '../common/file-names';
 import { stripPreamble } from '../llm/clean-response';
+import { AuditService } from '../audit/audit.service';
 
 const MIME_BY_EXTENSION: Record<string, string> = {
   '.pdf': 'application/pdf',
@@ -35,6 +36,7 @@ export class DocumentsService implements OnModuleInit {
     private prisma: PrismaService,
     private llmService: LlmService,
     private processing: ProcessingService,
+    private audit: AuditService,
   ) {}
 
   /**
@@ -78,6 +80,7 @@ export class DocumentsService implements OnModuleInit {
     });
     // Reading and explaining run in the background; the page shows progress.
     this.processing.enqueue(document.id);
+    await this.audit.record(userEmail, 'DOCUMENT_UPLOAD', { documentId: document.id, target: document.originalName });
     return this.toPublic(document);
   }
 
@@ -96,6 +99,7 @@ export class DocumentsService implements OnModuleInit {
       data: { status: 'PENDING', failureReason: null, explanationStatus: null, explanationError: null },
     });
     this.processing.enqueue(documentId);
+    await this.audit.record(userEmail, 'DOCUMENT_REPROCESS', { documentId, target: document.originalName });
     return this.toPublic(queued);
   }
 
@@ -136,6 +140,7 @@ export class DocumentsService implements OnModuleInit {
       data: { explanationStatus: 'PENDING', explanationError: null },
     });
     this.processing.enqueue(documentId);
+    await this.audit.record(userEmail, 'DOCUMENT_EXPLAIN_RETRY', { documentId, target: document.originalName });
     return this.toPublic(queued);
   }
 
@@ -153,6 +158,7 @@ export class DocumentsService implements OnModuleInit {
       this.prisma.llmInteraction.deleteMany({ where: { documentId } }),
       this.prisma.document.delete({ where: { id: documentId } }),
     ]);
+    await this.audit.record(userEmail, 'DOCUMENT_DELETE', { documentId, target: document.originalName });
     try {
       await fs.unlink(path.resolve(document.filePath));
     } catch (error) {
@@ -212,6 +218,12 @@ export class DocumentsService implements OnModuleInit {
       language,
     );
 
+    // the question's text is never logged: only that a question was asked, and in which mode
+    await this.audit.record(userEmail, 'DOCUMENT_ASK', {
+      documentId: document.id,
+      target: document.originalName,
+      details: { mode },
+    });
     return this.prisma.llmInteraction.create({
       data: {
         documentId: document.id,
@@ -235,6 +247,7 @@ export class DocumentsService implements OnModuleInit {
       orderBy: { createdAt: 'asc' },
     });
 
+    await this.audit.record(userEmail, 'DOCUMENT_VIEW', { documentId, target: document.originalName });
     const { owner: documentOwner, ...rest } = document;
     return {
       document: this.toPublic(rest),
@@ -249,6 +262,7 @@ export class DocumentsService implements OnModuleInit {
 
   async getFile(documentId: string, userEmail: string) {
     const document = await this.findAccessible(documentId, userEmail);
+    await this.audit.record(userEmail, 'DOCUMENT_DOWNLOAD', { documentId, target: document.originalName });
     const extension = path.extname(document.originalName).toLowerCase();
     return {
       path: path.resolve(document.filePath),
@@ -303,7 +317,9 @@ export class DocumentsService implements OnModuleInit {
       }),
       this.myTeams(document.userId),
     ]);
-    return { sharedWith: shared.map((s) => s.team), teams: mine };
+    // the choices: the owner's teams, plus any team it is already shared with
+    const teams = [...mine, ...shared.map((s) => s.team).filter((t) => !mine.some((m) => m.id === t.id))];
+    return { sharedWith: shared.map((s) => s.team), teams };
   }
 
   /**
@@ -315,7 +331,10 @@ export class DocumentsService implements OnModuleInit {
     if (!Array.isArray(teamIds) || teamIds.some((t) => typeof t !== 'string')) {
       throw new BadRequestException('teamIds must be a list of team ids.');
     }
-    const allowed = new Set((await this.myTeams(document.userId)).map((t) => t.id));
+    // Existing shares may stay even with teams the owner is not in (e.g. after
+    // the documents of a deleted account were transferred); new ones may not.
+    const current = await this.prisma.documentShare.findMany({ where: { documentId }, select: { teamId: true } });
+    const allowed = new Set([...(await this.myTeams(document.userId)).map((t) => t.id), ...current.map((c) => c.teamId)]);
     const wanted = [...new Set(teamIds as string[])];
     if (wanted.some((id) => !allowed.has(id))) {
       throw new BadRequestException('You can only share with teams you belong to.');
@@ -324,7 +343,13 @@ export class DocumentsService implements OnModuleInit {
       this.prisma.documentShare.deleteMany({ where: { documentId } }),
       this.prisma.documentShare.createMany({ data: wanted.map((teamId) => ({ documentId, teamId })) }),
     ]);
-    return this.shares(documentId, userEmail);
+    const result = await this.shares(documentId, userEmail);
+    await this.audit.record(userEmail, 'DOCUMENT_SHARING_CHANGED', {
+      documentId,
+      target: document.originalName,
+      details: { teams: result.sharedWith.map((t) => t.name) },
+    });
+    return result;
   }
 
   private myTeams(userId: string) {

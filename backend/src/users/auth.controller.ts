@@ -1,4 +1,11 @@
-import { Body, Controller, Get, HttpCode, Post, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
 import { AuthGuard, type AuthUser } from '../auth/auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { UsersService } from './users.service';
@@ -16,12 +23,23 @@ export class AuthController {
   @Get('setup')
   async setupStatus() {
     // defaultLanguage: language of the screens shown before signing in
-    return { needsSetup: await this.users.needsSetup(), defaultLanguage: defaultLanguage() };
+    return {
+      needsSetup: await this.users.needsSetup(),
+      defaultLanguage: defaultLanguage(),
+    };
   }
 
   /** Public, only while no administrator exists. */
   @Post('setup')
-  createAdmin(@Body() body: { name?: string; email?: string; password?: string; language?: string }) {
+  createAdmin(
+    @Body()
+    body: {
+      name?: string;
+      email?: string;
+      password?: string;
+      language?: string;
+    },
+  ) {
     return this.users.createFirstAdmin(body);
   }
 
@@ -42,7 +60,10 @@ export class AuthController {
   @Post('me/language')
   @HttpCode(200)
   @UseGuards(AuthGuard)
-  setLanguage(@CurrentUser() user: AuthUser, @Body() body: { language?: string }) {
+  setLanguage(
+    @CurrentUser() user: AuthUser,
+    @Body() body: { language?: string },
+  ) {
     return this.users.setLanguage(user.email, body.language);
   }
 
@@ -61,6 +82,10 @@ export class AuthController {
     @CurrentUser() user: AuthUser,
     @Body() body: { currentPassword?: string; newPassword?: string },
   ) {
-    await this.users.changeOwnPassword(user.email, body.currentPassword, body.newPassword);
+    await this.users.changeOwnPassword(
+      user.email,
+      body.currentPassword,
+      body.newPassword,
+    );
   }
 }

@@ -8,6 +8,7 @@ import { join } from 'path';
 import { PrismaService } from '../prisma/prisma.service';
 import { ProcessingService } from './processing.service';
 import { LlmService } from '../llm/llm.service';
+import { AuditService } from '../audit/audit.service';
 
 const OWNER = 'alice@example.com';
 
@@ -61,6 +62,7 @@ describe('DocumentsService', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: ProcessingService, useValue: processing },
         { provide: LlmService, useValue: llm },
+        { provide: AuditService, useValue: { record: jest.fn() } },
       ],
     }).compile();
     service = module.get(DocumentsService);

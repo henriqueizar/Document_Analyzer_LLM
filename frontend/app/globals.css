@@ -624,3 +624,36 @@ td button {
 .shared-docs summary {
   cursor: pointer;
 }
+
+/* Account deletion (Users) */
+.delete-account {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--error);
+}
+.delete-account fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 6px 10px;
+  border: 1px dashed var(--ink);
+}
+.form label.radio {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  text-transform: none;
+}
+.user-row .delete-account {
+  flex-basis: 100%;
+}
+.audit-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0;
+}
+.audit td small {
+  display: block;
+}

@@ -1,5 +1,7 @@
 "use client";
 
+import { signOut } from "next-auth/react";
+
 export const API_URL =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3000";
 
@@ -22,7 +24,14 @@ async function getBackendToken(): Promise<string> {
 export async function apiFetch(path: string, init: RequestInit = {}) {
   const headers = new Headers(init.headers);
   headers.set("Authorization", `Bearer ${await getBackendToken()}`);
-  return fetch(`${API_URL}${path}`, { ...init, headers });
+  const res = await fetch(`${API_URL}${path}`, { ...init, headers });
+  // The backend checks the account on every request: a deleted or deactivated
+  // account ends the browser session too, instead of leaving error screens.
+  if (res.status === 401) {
+    cached = null;
+    signOut({ callbackUrl: "/login" });
+  }
+  return res;
 }
 
 /** Extracts the backend's error message from a failed response. */

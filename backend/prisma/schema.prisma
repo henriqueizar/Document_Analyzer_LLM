@@ -127,3 +127,24 @@ model LlmInteraction {
 
   @@index([documentId, userId])
 }
+/// Activity log for the administrator (LGPD art. 37): who did what, on which
+/// document or account, and when. Metadata only: never the text of questions,
+/// answers or documents. Who and what are stored as text, so the record
+/// survives the deletion of the account or document it mentions.
+model AuditEvent {
+  id          String   @id @default(uuid())
+  createdAt   DateTime @default(now())
+  /// E-mail of whoever did it (the attempted e-mail for failed logins).
+  actorEmail  String
+  /// e.g. LOGIN, DOCUMENT_UPLOAD, DOCUMENT_ASK, TEAM_MEMBER_ADDED, USER_DELETED.
+  action      String
+  documentId  String?
+  /// What the action was about, as shown: a file name, a team, an account.
+  target      String?
+  /// Small non-content details, e.g. { "mode": "INTERPRETATION" }.
+  details     Json?
+
+  @@index([createdAt])
+  @@index([actorEmail])
+  @@index([documentId])
+}

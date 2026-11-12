@@ -90,6 +90,14 @@ Local accounts only; no external identity provider.
   health (is the configured model installed?), processing queue, failures, disk usage;
   teams with the names, owners, dates and status of the documents shared with them
   (removable); documents per person as a count. Never content, questions or answers.
+- **Account deletion** (`DELETE /users/:id`, administrators, with their own password):
+  the person's documents are deleted or transferred; their own questions are always
+  deleted; you cannot delete yourself or the last administrator. A deleted account's
+  browser session ends on its next request (any 401 signs out).
+- **Activity log** (`AuditEvent`, `GET /admin/audit?actor=&action=&limit=`): who, action,
+  document or account, time, small details (question mode, teams); never question,
+  answer or document text. Repeated views of a document count once per 10 minutes.
+  Recording never fails the action it records.
 - The e2e tests share the development database and remove everything they create when
   they finish (users on example.com with a run timestamp, their documents and files, and
   the teams named after the run), including leftovers of earlier runs.

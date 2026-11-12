@@ -3,6 +3,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { PrismaService } from '../prisma/prisma.service';
 import { LlmService } from '../llm/llm.service';
+import { AuditService } from '../audit/audit.service';
 
 /**
  * The administrator's panel: whether the system is working, and how teams and
@@ -14,6 +15,7 @@ export class AdminService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly llm: LlmService,
+    private readonly audit: AuditService,
   ) {}
 
   async overview() {
@@ -123,10 +125,31 @@ export class AdminService {
   }
 
   /** Stops sharing a document with a team (the document stays with its owner). */
-  async removeShare(teamId: string, documentId: string): Promise<void> {
-    const { count } = await this.prisma.documentShare.deleteMany({
-      where: { teamId, documentId },
+  async removeShare(
+    teamId: string,
+    documentId: string,
+    actorEmail: string,
+  ): Promise<void> {
+    const share = await this.prisma.documentShare.findUnique({
+      where: { documentId_teamId: { documentId, teamId } },
+      include: {
+        team: { select: { name: true } },
+        document: { select: { originalName: true } },
+      },
     });
-    if (!count) throw new NotFoundException('Sharing not found.');
+    if (!share) throw new NotFoundException('Sharing not found.');
+    await this.prisma.documentShare.delete({
+      where: { documentId_teamId: { documentId, teamId } },
+    });
+    await this.audit.record(actorEmail, 'SHARING_REMOVED_BY_ADMIN', {
+      documentId,
+      target: share.document.originalName,
+      details: { team: share.team.name },
+    });
+  }
+
+  /** The activity log (metadata only). */
+  auditLog(filter: { actor?: unknown; action?: unknown; limit?: unknown }) {
+    return this.audit.list(filter);
   }
 }

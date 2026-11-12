@@ -159,7 +159,7 @@ testes e detalhes de arquitetura, veja [`docs/desenvolvimento.md`](docs/desenvol
 - [ ] Busca entre documentos ("onde está o contrato em que o cliente ofereceu X reais?"),
       com a evidência de cada resultado e "nenhum documento" quando for o caso
 - [ ] Dados de demonstração por comando explícito (nunca numa instalação real)
-- [ ] Exclusão de conta com transferência de documentos e log de auditoria (só metadados)
+- [x] Exclusão de conta (apagar ou transferir os documentos, com a senha do administrador) e registro de atividades (só metadados)
 
 ## Tecnologias
 

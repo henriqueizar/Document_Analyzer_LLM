@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { apiFetch, errorMessage } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 import TeamsSection, { type Team } from './teams';
+import AuditSection from './audit';
 
 interface Health {
   database: { ok: boolean; error?: string };
@@ -102,6 +103,8 @@ export default function AdminPage() {
           <TeamsSection teams={data.teams} users={data.usage} reload={reload} />
           <hr />
           <UsageSection usage={data.usage} />
+          <hr />
+          <AuditSection people={data.usage} />
         </>
       )}
     </div>

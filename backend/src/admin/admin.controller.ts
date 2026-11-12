@@ -4,9 +4,11 @@ import {
   Get,
   HttpCode,
   Param,
+  Query,
   UseGuards,
 } from '@nestjs/common';
-import { AdminGuard, AuthGuard } from '../auth/auth.guard';
+import { AdminGuard, AuthGuard, type AuthUser } from '../auth/auth.guard';
+import { CurrentUser } from '../auth/current-user.decorator';
 import { AdminService } from './admin.service';
 
 @Controller('admin')
@@ -24,7 +26,18 @@ export class AdminController {
   async removeShare(
     @Param('teamId') teamId: string,
     @Param('documentId') documentId: string,
+    @CurrentUser() user: AuthUser,
   ) {
-    await this.admin.removeShare(teamId, documentId);
+    await this.admin.removeShare(teamId, documentId, user.email);
+  }
+
+  /** Activity log, newest first: ?actor=<e-mail>&action=<ACTION>&limit=<n>. */
+  @Get('audit')
+  audit(
+    @Query('actor') actor?: string,
+    @Query('action') action?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.admin.auditLog({ actor, action, limit });
   }
 }

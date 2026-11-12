@@ -64,8 +64,8 @@ jest.setTimeout(120_000);
  * the tests create is matched: users on the reserved example.com domain with a
  * run timestamp, and the teams named after a run.
  */
-const TEST_USER = /^(alice|mallory|ghost|admin|admin2|bruna|carlos|dora)-\d{13}@example\.com$/;
-const TEST_TEAM = /^(Jurídico|RH|Financeiro) \d{13}$/;
+const TEST_USER = /^(alice|mallory|ghost|admin|admin2|admin3|bruna|carlos|dora|eva|fabio|gustavo)-\d{13}@example\.com$/;
+const TEST_TEAM = /^(Jurídico|RH|Financeiro|Diretoria) \d{13}$/;
 
 async function removeTestData(prisma: PrismaService) {
   const users = (await prisma.user.findMany({ where: { email: { endsWith: '@example.com' } }, select: { id: true, email: true } }))
@@ -78,6 +78,10 @@ async function removeTestData(prisma: PrismaService) {
   const teams = (await prisma.team.findMany({ select: { id: true, name: true } })).filter((t) => TEST_TEAM.test(t.name));
   await prisma.team.deleteMany({ where: { id: { in: teams.map((t) => t.id) } } });
   await prisma.user.deleteMany({ where: { id: { in: users } } });
+  const events = (await prisma.auditEvent.findMany({ where: { actorEmail: { endsWith: '@example.com' } }, select: { id: true, actorEmail: true } }))
+    .filter((e) => TEST_USER.test(e.actorEmail))
+    .map((e) => e.id);
+  await prisma.auditEvent.deleteMany({ where: { id: { in: events } } });
   await Promise.all(documents.map((d) => unlink(resolve(d.filePath)).catch(() => undefined)));
 }
 
@@ -463,6 +467,101 @@ describe('Documents API (e2e)', () => {
       await http().delete(`/admin/teams/${team}/documents/${doc}`).set('Authorization', admin).expect(404);
       await http().get(`/documents/${doc}`).set('Authorization', dora).expect(404);
       await http().get(`/documents/${doc}`).set('Authorization', alice).expect(200);
+    });
+  });
+
+  describe('account deletion and activity log', () => {
+    const ADMIN3 = `admin3-${runId}@example.com`;
+    const EVA = `eva-${runId}@example.com`;
+    const FABIO = `fabio-${runId}@example.com`;
+    const GUSTAVO = `gustavo-${runId}@example.com`;
+    const ids: Record<string, string> = {};
+    const auth: Record<string, string> = {};
+    let aliceDoc: string;
+    let evaDoc: string;
+    let gustavoDoc: string;
+    let evaFile: string;
+
+    beforeAll(async () => {
+      const prisma = app.get(PrismaService);
+      const passwordHash = await hashPassword('e2e-password');
+      for (const [email, role] of [[ADMIN3, 'ADMIN'], [EVA, 'USER'], [FABIO, 'USER'], [GUSTAVO, 'USER']] as const) {
+        ids[email] = (await prisma.user.create({ data: { email, name: email.split('-')[0], passwordHash, role } })).id;
+        auth[email] = `Bearer ${await tokenFor(email)}`;
+      }
+      // Eva can read one of Alice's documents through a team, and asks about it
+      const team = (await http().post('/teams').set('Authorization', auth[ADMIN3]).send({ name: `Diretoria ${runId}` }).expect(201)).body.id;
+      const aliceId = (await prisma.user.findUniqueOrThrow({ where: { email: ALICE } })).id;
+      for (const userId of [aliceId, ids[EVA]]) {
+        await http().post(`/teams/${team}/members`).set('Authorization', auth[ADMIN3]).send({ userId }).expect(204);
+      }
+      aliceDoc = (await http().post('/documents/upload').set('Authorization', alice).attach('file', fixture('doc-a.pdf')).expect(201)).body.id;
+      evaDoc = (await http().post('/documents/upload').set('Authorization', auth[EVA]).attach('file', fixture('doc-b.pdf')).expect(201)).body.id;
+      gustavoDoc = (await http().post('/documents/upload').set('Authorization', auth[GUSTAVO]).attach('file', fixture('receipt.png')).expect(201)).body.id;
+      await processed();
+      await http().put(`/documents/${aliceDoc}/shares`).set('Authorization', alice).send({ teamIds: [team] }).expect(200);
+      await http().post(`/documents/${aliceDoc}/ask`).set('Authorization', auth[EVA]).send({ question: 'eva confidential salary question' }).expect(201);
+      await http().post(`/documents/${gustavoDoc}/ask`).set('Authorization', auth[GUSTAVO]).send({ question: 'gustavo question' }).expect(201);
+      evaFile = (await prisma.document.findUniqueOrThrow({ where: { id: evaDoc } })).filePath;
+    });
+
+    it('requires an administrator, their password and a choice for the documents', async () => {
+      const del = (who: string, target: string, body: object) =>
+        http().delete(`/users/${ids[target]}`).set('Authorization', auth[who]).send(body);
+      await del(FABIO, EVA, { adminPassword: 'e2e-password', documents: 'delete' }).expect(403);
+      await del(ADMIN3, EVA, { adminPassword: 'wrong-password', documents: 'delete' }).expect(403);
+      await del(ADMIN3, ADMIN3, { adminPassword: 'e2e-password', documents: 'delete' }).expect(400);
+      await del(ADMIN3, EVA, { adminPassword: 'e2e-password' }).expect(400);
+      await del(ADMIN3, EVA, { adminPassword: 'e2e-password', documents: 'transfer', transferTo: ids[EVA] }).expect(400);
+    });
+
+    it('deletes the account with its documents, files and questions (also on shared documents)', async () => {
+      const prisma = app.get(PrismaService);
+      const res = await http().delete(`/users/${ids[EVA]}`).set('Authorization', auth[ADMIN3]).send({ adminPassword: 'e2e-password', documents: 'delete' }).expect(200);
+      expect(res.body).toEqual({ documents: 1, mode: 'delete' });
+      await http().get('/documents').set('Authorization', auth[EVA]).expect(401);
+      expect(await prisma.document.findUnique({ where: { id: evaDoc } })).toBeNull();
+      expect(existsSync(resolve(evaFile))).toBe(false);
+      expect(await prisma.llmInteraction.count({ where: { question: 'eva confidential salary question' } })).toBe(0);
+      // Alice's shared document is untouched
+      await http().get(`/documents/${aliceDoc}`).set('Authorization', alice).expect(200);
+    });
+
+    it('or transfers the documents (with their explanation, without the old owner\'s questions)', async () => {
+      await http().delete(`/users/${ids[GUSTAVO]}`).set('Authorization', auth[ADMIN3])
+        .send({ adminPassword: 'e2e-password', documents: 'transfer', transferTo: ids[FABIO] }).expect(200);
+      const { body } = await http().get(`/documents/${gustavoDoc}`).set('Authorization', auth[FABIO]).expect(200);
+      expect(body.access.owner).toBe(true);
+      expect(body.interactions.map((i: { role: string }) => i.role)).toEqual(['EXPLANATION']);
+      const list = (await http().get('/documents').set('Authorization', auth[FABIO]).expect(200)).body;
+      expect(list.map((d: { id: string }) => d.id)).toContain(gustavoDoc);
+    });
+
+    it('records who did what, on which document and when, never the text of questions', async () => {
+      await http().get('/admin/audit').set('Authorization', alice).expect(403);
+      await http().post('/auth/login').send({ email: FABIO, password: 'wrong-password' }).expect(401);
+      await http().post('/auth/login').send({ email: FABIO, password: 'e2e-password' }).expect(200);
+      // opening the same document twice in a row is recorded once
+      await http().get(`/documents/${gustavoDoc}`).set('Authorization', auth[FABIO]).expect(200);
+
+      const log = (await http().get('/admin/audit').query({ limit: 1000 }).set('Authorization', auth[ADMIN3]).expect(200)).body as {
+        actorEmail: string; action: string; documentId: string | null; target: string | null; details: Record<string, unknown> | null;
+      }[];
+      const has = (actor: string, action: string, extra: object = {}) =>
+        expect(log).toContainEqual(expect.objectContaining({ actorEmail: actor, action, ...extra }));
+      has(FABIO, 'LOGIN_FAILED');
+      has(FABIO, 'LOGIN');
+      has(EVA, 'DOCUMENT_UPLOAD', { documentId: evaDoc, target: 'doc-b.pdf' });
+      has(EVA, 'DOCUMENT_ASK', { documentId: aliceDoc, details: { mode: 'STRICT' } });
+      has(ALICE, 'DOCUMENT_SHARING_CHANGED', { documentId: aliceDoc, details: { teams: [`Diretoria ${runId}`] } });
+      has(ADMIN3, 'TEAM_MEMBER_ADDED', { target: `Diretoria ${runId}: ${EVA}` });
+      has(ADMIN3, 'USER_DELETED', { target: EVA, details: { documents: 1, mode: 'delete' } });
+      has(ADMIN3, 'USER_DELETED', { target: GUSTAVO, details: { documents: 1, mode: 'transfer', transferredTo: FABIO } });
+      expect(log.filter((e) => e.actorEmail === FABIO && e.action === 'DOCUMENT_VIEW' && e.documentId === gustavoDoc)).toHaveLength(1);
+      expect(JSON.stringify(log)).not.toContain('confidential salary');
+
+      const onlyFabio = (await http().get('/admin/audit').query({ actor: FABIO }).set('Authorization', auth[ADMIN3]).expect(200)).body;
+      expect(onlyFabio.every((e: { actorEmail: string }) => e.actorEmail === FABIO)).toBe(true);
     });
   });
 
