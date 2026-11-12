@@ -59,5 +59,8 @@ model LlmInteraction {
   question   String
   answer     String
   role       String
+  /// Document passages sent to the model for this answer: [{ page, text }].
+  /// Lets users check exactly what each [p. N] citation refers to.
+  sources    Json?
   createdAt  DateTime @default(now())
 }

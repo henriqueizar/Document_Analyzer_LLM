@@ -12,12 +12,20 @@ import {
   Turn,
 } from './prompts';
 import { checkGrounding, groundingWarning, hasCitation, isNotFound } from './grounding';
+import { attributeCitations, Source } from './citations';
 
 export { DEFAULT_LLM_MODEL } from './ollama.client';
 
 export interface DocumentInput {
   name: string;
   text: string;
+}
+
+/** An explanation or answer, with the document passages the model was given. */
+export interface LlmResult {
+  text: string;
+  /** What each [p. N] in `text` can refer to: exactly what the model saw. */
+  sources: Source[];
 }
 
 /** Rough size of a token in characters (Portuguese/English, conservative). */
@@ -52,26 +60,28 @@ export class LlmService {
   }
 
   /** Automatic explanation shown when a document is processed. */
-  async explainDocument(document: DocumentInput): Promise<string> {
+  async explainDocument(document: DocumentInput): Promise<LlmResult> {
     const lang = detectLanguage(document.text);
     const passages = splitIntoPassages(document.text);
     const budget = this.budget(RESERVED_TOKENS.explain);
     const selected = leading(passages, budget);
     const doc = this.context(document, passages, selected);
+    const sources = toSources(selected);
 
     const raw = await this.client.chat(explainMessages(lang, doc), {
       temperature: 0,
       maxTokens: MAX_TOKENS.explain,
     });
-    let explanation = stripPreamble(raw);
+    // One citation per sentence, computed by code when the model piled them up.
+    let explanation = attributeCitations(stripPreamble(raw), sources);
 
     explanation = this.withGroundingCheck(explanation, doc, lang, { requireCitation: true });
     if (!doc.complete) explanation += `\n\n${partialExplanationNote(lang, doc)}`;
-    return explanation;
+    return { text: explanation, sources };
   }
 
   /** Answers a question using only passages of the document. */
-  async askQuestion(document: DocumentInput, question: string, history: Turn[] = []): Promise<string> {
+  async askQuestion(document: DocumentInput, question: string, history: Turn[] = []): Promise<LlmResult> {
     const lang = detectLanguage(question, detectLanguage(document.text));
     const passages = splitIntoPassages(document.text);
     const recent = this.fitHistory(history);
@@ -81,19 +91,25 @@ export class LlmService {
     const budget = this.budget(RESERVED_TOKENS.answer) - historyChars;
     const selection = selectPassages(passages, searchText, budget);
     const doc = this.context(document, passages, selection.passages);
+    const sources = toSources(selection.passages);
 
     const raw = await this.client.chat(answerMessages(lang, doc, question, recent), {
       temperature: 0,
       maxTokens: MAX_TOKENS.answer,
     });
     const answer = stripPreamble(raw) || '';
-    if (!answer) return lang === 'pt' ? 'O modelo não retornou resposta.' : 'The model returned an empty response.';
+    if (!answer) {
+      return { text: lang === 'pt' ? 'O modelo não retornou resposta.' : 'The model returned an empty response.', sources };
+    }
     // "A multa não está especificada. Não encontrei essa informação no documento."
     // -> just the standard sentence. Answers that cite pages carry real content
     // (e.g. one part found, another not) and are kept as they are.
-    if (isNotFound(answer) && !hasCitation(answer)) return NOT_FOUND[lang];
+    if (isNotFound(answer) && !hasCitation(answer)) return { text: NOT_FOUND[lang], sources };
 
-    return this.withGroundingCheck(answer, doc, lang, { requireCitation: true, ignore: question });
+    return {
+      text: this.withGroundingCheck(answer, doc, lang, { requireCitation: true, ignore: question }),
+      sources,
+    };
   }
 
   private withGroundingCheck(
@@ -137,4 +153,8 @@ export class LlmService {
   private budget(reservedTokens: number): number {
     return Math.max(2000, (this.numCtx - reservedTokens) * CHARS_PER_TOKEN);
   }
+}
+
+function toSources(passages: Passage[]): Source[] {
+  return passages.map((p) => ({ page: p.page, text: p.text }));
 }

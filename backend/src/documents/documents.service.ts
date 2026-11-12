@@ -7,6 +7,7 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { OcrService } from '../ocr/ocr.service';
 import * as path from 'path';
@@ -108,7 +109,8 @@ export class DocumentsService {
           documentId: updatedDocument.id,
           role: 'EXPLANATION',
           question: '',
-          answer: explanation,
+          answer: explanation.text,
+          sources: explanation.sources as unknown as Prisma.InputJsonValue,
         },
       });
 
@@ -162,7 +164,8 @@ export class DocumentsService {
         documentId: document.id,
         role: 'QUESTION',
         question,
-        answer,
+        answer: answer.text,
+        sources: answer.sources as unknown as Prisma.InputJsonValue,
       },
     });
   }

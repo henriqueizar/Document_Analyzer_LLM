@@ -50,8 +50,8 @@ describe('DocumentsService', () => {
       extractText: jest.fn().mockResolvedValue('image text'),
     };
     llm = {
-      explainDocument: jest.fn().mockResolvedValue('explanation'),
-      askQuestion: jest.fn().mockResolvedValue('answer'),
+      explainDocument: jest.fn().mockResolvedValue({ text: 'explanation', sources: [{ page: 1, text: 'src' }] }),
+      askQuestion: jest.fn().mockResolvedValue({ text: 'answer', sources: [{ page: 1, text: 'src' }] }),
     };
     const module: TestingModule = await Test.createTestingModule({
       providers: [

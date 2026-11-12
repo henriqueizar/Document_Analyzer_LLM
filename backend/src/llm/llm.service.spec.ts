@@ -37,7 +37,7 @@ describe('LlmService', () => {
   describe('askQuestion', () => {
     it('answers in Portuguese with Portuguese-only instructions for a Portuguese question', async () => {
       fetchMock.mockResolvedValue(ok('O valor mensal é de R$ 12.500,00 [p. 2].'));
-      const answer = await new LlmService().askQuestion(contract, 'Qual é o valor mensal?');
+      const { text: answer } = await new LlmService().askQuestion(contract, 'Qual é o valor mensal?');
 
       expect(answer).toBe('O valor mensal é de R$ 12.500,00 [p. 2].');
       expect(system()).toMatch(/Use SOMENTE as informações dos trechos/);
@@ -59,7 +59,7 @@ describe('LlmService', () => {
     it('accepts the fixed "not found" answer without a warning', async () => {
       fetchMock.mockResolvedValue(ok('Não encontrei essa informação no documento.'));
       await expect(
-        new LlmService().askQuestion(contract, 'Qual é a capital da França?'),
+        new LlmService().askQuestion(contract, 'Qual é a capital da França?').then((r) => r.text),
       ).resolves.toBe('Não encontrei essa informação no documento.');
     });
 
@@ -68,7 +68,7 @@ describe('LlmService', () => {
         ok('A multa para atraso no pagamento não está especificada no documento. Não encontrei essa informação no documento.'),
       );
       await expect(
-        new LlmService().askQuestion(contract, 'Qual é a multa por atraso?'),
+        new LlmService().askQuestion(contract, 'Qual é a multa por atraso?').then((r) => r.text),
       ).resolves.toBe('Não encontrei essa informação no documento.');
     });
 
@@ -76,25 +76,25 @@ describe('LlmService', () => {
       const partial = 'O valor mensal é de R$ 12.500,00 [p. 2]. Não encontrei essa informação no documento quanto ao CNPJ.';
       fetchMock.mockResolvedValue(ok(partial));
       await expect(
-        new LlmService().askQuestion(contract, 'Qual o valor mensal e o CNPJ?'),
+        new LlmService().askQuestion(contract, 'Qual o valor mensal e o CNPJ?').then((r) => r.text),
       ).resolves.toBe(partial);
     });
 
     it('flags numbers that are not in the document', async () => {
       fetchMock.mockResolvedValue(ok('O valor mensal é de R$ 15.000,00 [p. 2].'));
-      const answer = await new LlmService().askQuestion(contract, 'Qual é o valor mensal?');
+      const { text: answer } = await new LlmService().askQuestion(contract, 'Qual é o valor mensal?');
       expect(answer).toMatch(/⚠ Verificação automática: a resposta contém 15.000,00, que não aparece no documento/);
     });
 
     it('flags answers without any page citation', async () => {
       fetchMock.mockResolvedValue(ok('O contrato é entre ACME e Beta.'));
-      const answer = await new LlmService().askQuestion(contract, 'Quem são as partes?');
+      const { text: answer } = await new LlmService().askQuestion(contract, 'Quem são as partes?');
       expect(answer).toMatch(/não cita nenhuma página/);
     });
 
     it('does not flag numbers that come from the question itself', async () => {
       fetchMock.mockResolvedValue(ok('A cláusula 8 trata da rescisão, com aviso prévio de 60 dias [p. 3].'));
-      const answer = await new LlmService().askQuestion(contract, 'O que diz a cláusula 8?');
+      const { text: answer } = await new LlmService().askQuestion(contract, 'O que diz a cláusula 8?');
       expect(answer).not.toMatch(/⚠/);
     });
 
@@ -164,14 +164,15 @@ describe('LlmService', () => {
       fetchMock.mockResolvedValue(
         ok("Sure, here's the explanation:\n\nContrato de serviços entre ACME e Beta [p. 1]."),
       );
-      const explanation = await new LlmService().explainDocument(contract);
+      const { text: explanation } = await new LlmService().explainDocument(contract);
       expect(explanation).toBe('Contrato de serviços entre ACME e Beta [p. 1].');
       expect(system()).toMatch(/Você resume documentos/);
     });
 
     it('asks for a page citation in every sentence and flags explanations without any', async () => {
-      fetchMock.mockResolvedValue(ok('Contrato de serviços entre ACME e Beta.'));
-      const explanation = await new LlmService().explainDocument(contract);
+      // nothing in the document backs this sentence, so no citation can be attributed
+      fetchMock.mockResolvedValue(ok('Documento com disposições variadas e bem organizadas.'));
+      const { text: explanation } = await new LlmService().explainDocument(contract);
       expect(system()).toMatch(/No fim de cada frase que traz informação do documento, indique a página/);
       expect(explanation).toMatch(/⚠ Verificação automática: a resposta não cita nenhuma página/);
     });
@@ -183,7 +184,7 @@ describe('LlmService', () => {
         text: ['--- Page 1 ---', filler(30), '--- Page 2 ---', filler(30), '--- Page 3 ---', filler(30)].join('\n'),
       };
       fetchMock.mockResolvedValue(ok('Documento com disposições gerais [p. 1].'));
-      const explanation = await new LlmService().explainDocument(long);
+      const { text: explanation } = await new LlmService().explainDocument(long);
       expect(explanation).toMatch(/\(Explicação baseada nas páginas 1(–\d)? de 3\./);
     });
   });
@@ -191,5 +192,19 @@ describe('LlmService', () => {
   it('propagates LLM failures instead of returning them as answers', async () => {
     fetchMock.mockRejectedValue(new TypeError('fetch failed'));
     await expect(new LlmService().askQuestion(contract, 'b')).rejects.toThrow(/LLM unavailable/);
+  });
+
+  it('returns the passages the model was given as sources, with their pages', async () => {
+    fetchMock.mockResolvedValue(ok('O valor mensal é de R$ 12.500,00 [p. 2].'));
+    const { sources } = await new LlmService().askQuestion(contract, 'Qual é o valor mensal?');
+    expect(sources).toEqual(expect.arrayContaining([expect.objectContaining({ page: 2, text: expect.stringContaining('R$ 12.500,00') })]));
+  });
+
+  it('gives each explanation sentence its own citation when the model piles them up', async () => {
+    fetchMock.mockResolvedValue(
+      ok('Contrato de prestação de serviços entre ACME Ltda. e Beta S.A. O valor mensal é de R$ 12.500,00. [p. 1] [p. 2]'),
+    );
+    const { text } = await new LlmService().explainDocument(contract);
+    expect(text).toBe('Contrato de prestação de serviços entre ACME Ltda. e Beta S.A [p. 1]. O valor mensal é de R$ 12.500,00 [p. 2].');
   });
 });

@@ -30,8 +30,14 @@ const ALICE = `alice-${runId}@example.com`;
 const MALLORY = `mallory-${runId}@example.com`;
 
 const llmStub = {
-  explainDocument: jest.fn(async (doc: { text: string }) => `EXPLANATION OF: ${doc.text.slice(0, 40)}`),
-  askQuestion: jest.fn(async (_doc: unknown, question: string) => `ANSWER TO: ${question}`),
+  explainDocument: jest.fn(async (doc: { text: string }) => ({
+    text: `EXPLANATION OF: ${doc.text.slice(0, 40)} [p. 1]`,
+    sources: [{ page: 1, text: doc.text.slice(0, 200) }],
+  })),
+  askQuestion: jest.fn(async (_doc: unknown, question: string) => ({
+    text: `ANSWER TO: ${question}`,
+    sources: [{ page: 3, text: 'PAGE 3 DUE DATE DECEMBER' }],
+  })),
 };
 
 function tokenFor(email: string) {
@@ -92,7 +98,7 @@ describe('Documents API (e2e)', () => {
     expect(doc.body.document.extractedText).toMatch(/PAGE 1/);
     expect(doc.body.document.extractedText).toMatch(/PAGE 3/);
     expect(doc.body.interactions).toEqual([
-      expect.objectContaining({ role: 'EXPLANATION' }),
+      expect.objectContaining({ role: 'EXPLANATION', sources: [expect.objectContaining({ page: 1 })] }),
     ]);
 
     const ask = await http()
@@ -101,6 +107,7 @@ describe('Documents API (e2e)', () => {
       .send({ question: 'What is the due date?' })
       .expect(201);
     expect(ask.body).toMatchObject({ role: 'QUESTION', answer: 'ANSWER TO: What is the due date?' });
+    expect(ask.body.sources).toEqual([{ page: 3, text: 'PAGE 3 DUE DATE DECEMBER' }]);
 
     const list = await http().get('/documents').set('Authorization', alice).expect(200);
     expect(list.body.map((d: { id: string }) => d.id)).toContain(id);

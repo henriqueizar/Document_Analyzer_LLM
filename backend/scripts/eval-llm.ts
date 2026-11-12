@@ -66,7 +66,7 @@ async function main() {
   let failures = 0;
   const started = Date.now();
 
-  const explanation = await llm.explainDocument(document);
+  const explanation = (await llm.explainDocument(document)).text;
   const explanationOk =
     !WARNING.test(explanation) && CITATION.test(explanation) && /12\.500,00|limpeza/i.test(explanation);
   failures += explanationOk ? 0 : 1;
@@ -74,7 +74,7 @@ async function main() {
 
   for (const c of cases) {
     const t0 = Date.now();
-    const answer = await llm.askQuestion(document, c.question, c.history ?? []);
+    const answer = (await llm.askQuestion(document, c.question, c.history ?? [])).text;
     const problems: string[] = [];
     if (c.refuse) {
       if (!isNotFound(answer)) problems.push('should have said the information is not in the document');
