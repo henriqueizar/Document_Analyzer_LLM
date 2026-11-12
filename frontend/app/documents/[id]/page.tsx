@@ -436,8 +436,7 @@ export default function DocumentPage() {
             onChange={(e) => setInterpret(e.target.checked)}
             disabled={!ready || asking}
           />
-          Interpret: let the model analyse beyond what is written (answer marked as interpretation; off
-          again after sending)
+          Interpret: let the model analyse beyond what is written (answer marked as interpretation)
         </label>
         {error && (
           <p role="alert" className="error">Error: {error}</p>
