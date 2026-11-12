@@ -26,7 +26,7 @@ A **instalação** usa a internet uma vez: pacotes npm, imagens Docker e o model
 | Explicação automática, com os trechos usados como fonte | LLM local | PostgreSQL local (`LlmInteraction`, papel `EXPLANATION`) | Quem tem acesso ao documento |
 | Perguntas e respostas, com os trechos usados como fonte | Usuário / LLM local | PostgreSQL local (`LlmInteraction`, com o autor em `userId`) | **Somente quem perguntou**, também em documentos compartilhados (nem o dono vê as perguntas dos outros) |
 | Equipes e membros | Administrador | PostgreSQL local (`Team`, `TeamMember`) | O administrador; cada pessoa vê as equipes de que participa |
-| Compartilhamentos (documento ↔ equipe) | Dono do documento | PostgreSQL local (`DocumentShare`) | O dono; os membros veem o nome da própria equipe. O administrador vê só quantos documentos cada equipe tem, nunca quais nem o conteúdo |
+| Compartilhamentos (documento ↔ equipe) | Dono do documento | PostgreSQL local (`DocumentShare`) | O dono; os membros veem o nome da própria equipe. No painel, o administrador vê o **nome, o dono, a data e o status** dos documentos compartilhados com cada equipe, e pode remover um compartilhamento; nunca vê o conteúdo, as perguntas ou as respostas. De documentos privados, vê só quantos cada pessoa tem |
 | Nome, e-mail e papel do usuário | Cadastro feito pelo administrador (ou configuração inicial) | PostgreSQL local (`User`) e cookie de sessão | O próprio usuário; o administrador vê a lista de usuários |
 | Senha | Usuário | PostgreSQL local, **somente o hash scrypt com sal** (a senha nunca é armazenada) | Ninguém |
 
@@ -79,6 +79,9 @@ Ollama podem verificar atualizações por conta própria.
 
 - Exclusão de contas de usuário (com seus documentos) pelo administrador.
 - Registro de auditoria: quem acessou ou perguntou o quê (registro das operações, art. 37).
+- O nome de um arquivo pode, por si só, revelar dado pessoal (por exemplo,
+  "advertência_joão.pdf"). O administrador vê os nomes dos documentos compartilhados com
+  equipes; quem compartilha deve dar nomes neutros a arquivos sensíveis.
 - O administrador controla quem está em cada equipe. Portanto, pode se incluir numa
   equipe e passar a ver os documentos compartilhados com ela. Isso é inerente a qualquer
   modelo em que alguém gerencia os grupos; a mitigação prevista é o registro de

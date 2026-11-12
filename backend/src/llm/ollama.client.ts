@@ -51,6 +51,22 @@ export function stripThinking(text: string): string {
 export class OllamaClient {
   constructor(readonly config: OllamaConfig) {}
 
+  /**
+   * Whether Ollama answers and has the configured model (for the admin's
+   * health view). Local request with a short timeout; never throws.
+   */
+  async status(): Promise<{ reachable: boolean; modelInstalled: boolean; error?: string }> {
+    try {
+      const res = await fetch(`${this.config.baseUrl}/api/tags`, { signal: AbortSignal.timeout(3000) });
+      if (!res.ok) return { reachable: false, modelInstalled: false, error: `HTTP ${res.status}` };
+      const { models = [] } = (await res.json()) as { models?: { name: string }[] };
+      const wanted = this.config.model.includes(':') ? this.config.model : `${this.config.model}:latest`;
+      return { reachable: true, modelInstalled: models.some((m) => m.name === wanted) };
+    } catch (error) {
+      return { reachable: false, modelInstalled: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
   async chat(messages: ChatMessage[], options: ChatOptions): Promise<string> {
     const body = {
       model: this.config.model,

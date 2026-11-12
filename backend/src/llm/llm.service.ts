@@ -72,6 +72,11 @@ export class LlmService {
     );
   }
 
+  /** Health of the local LLM, for the administrator's panel. */
+  async status() {
+    return { model: this.model, url: this.client.config.baseUrl, ...(await this.client.status()) };
+  }
+
   /** Automatic explanation shown when a document is processed. */
   /** `language`: the reader's preference; when absent, the document's language. */
   async explainDocument(document: DocumentInput, language?: Language): Promise<LlmResult> {

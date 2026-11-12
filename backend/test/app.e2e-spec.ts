@@ -12,6 +12,7 @@ import request from 'supertest';
 import { SignJWT } from 'jose';
 import { join, resolve } from 'path';
 import { existsSync } from 'fs';
+import { unlink } from 'fs/promises';
 import { AppModule } from '../src/app.module';
 import { LlmService } from '../src/llm/llm.service';
 import { JWT_AUDIENCE, JWT_ISSUER } from '../src/auth/auth.constants';
@@ -37,6 +38,7 @@ const llmStub = {
     sources: [{ page: 1, text: doc.text.slice(0, 200) }],
   })),
   translate: jest.fn(async (text: string, to: string) => ({ text: `[${to}] ${text}`, verified: true })),
+  status: jest.fn(async () => ({ model: 'stub', url: 'http://localhost:11434', reachable: true, modelInstalled: true })),
   askQuestion: jest.fn(async (_doc: unknown, question: string) => ({
     text: `ANSWER TO: ${question}`,
     sources: [{ page: 3, text: 'PAGE 3 DUE DATE DECEMBER' }],
@@ -55,6 +57,29 @@ function tokenFor(email: string) {
 }
 
 jest.setTimeout(120_000);
+
+/**
+ * The e2e tests share the development database, so everything they create is
+ * removed at the end: this run's data and leftovers of earlier runs. Only data
+ * the tests create is matched: users on the reserved example.com domain with a
+ * run timestamp, and the teams named after a run.
+ */
+const TEST_USER = /^(alice|mallory|ghost|admin|admin2|bruna|carlos|dora)-\d{13}@example\.com$/;
+const TEST_TEAM = /^(Jurídico|RH|Financeiro) \d{13}$/;
+
+async function removeTestData(prisma: PrismaService) {
+  const users = (await prisma.user.findMany({ where: { email: { endsWith: '@example.com' } }, select: { id: true, email: true } }))
+    .filter((u) => TEST_USER.test(u.email))
+    .map((u) => u.id);
+  const documents = await prisma.document.findMany({ where: { userId: { in: users } }, select: { id: true, filePath: true } });
+  const documentIds = documents.map((d) => d.id);
+  await prisma.llmInteraction.deleteMany({ where: { OR: [{ documentId: { in: documentIds } }, { userId: { in: users } }] } });
+  await prisma.document.deleteMany({ where: { id: { in: documentIds } } });
+  const teams = (await prisma.team.findMany({ select: { id: true, name: true } })).filter((t) => TEST_TEAM.test(t.name));
+  await prisma.team.deleteMany({ where: { id: { in: teams.map((t) => t.id) } } });
+  await prisma.user.deleteMany({ where: { id: { in: users } } });
+  await Promise.all(documents.map((d) => unlink(resolve(d.filePath)).catch(() => undefined)));
+}
 
 describe('Documents API (e2e)', () => {
   let app: INestApplication;
@@ -81,6 +106,8 @@ describe('Documents API (e2e)', () => {
   });
 
   afterAll(async () => {
+    await processed();
+    await removeTestData(app.get(PrismaService));
     await app.close();
   });
 
@@ -373,6 +400,68 @@ describe('Documents API (e2e)', () => {
       await http().delete(`/teams/${legal}`).set('Authorization', admin).expect(204);
       await http().get(`/documents/${doc}`).set('Authorization', bruna).expect(404);
       // the document itself stays with its owner
+      await http().get(`/documents/${doc}`).set('Authorization', alice).expect(200);
+    });
+  });
+
+  describe('administrator panel', () => {
+    const ADMIN2 = `admin2-${runId}@example.com`;
+    const DORA = `dora-${runId}@example.com`;
+    let admin: string;
+    let dora: string;
+    let team: string;
+    let doc: string;
+    let doraId: string;
+
+    beforeAll(async () => {
+      const prisma = app.get(PrismaService);
+      const passwordHash = await hashPassword('e2e-password');
+      await prisma.user.create({ data: { email: ADMIN2, name: 'admin2', passwordHash, role: 'ADMIN' } });
+      doraId = (await prisma.user.create({ data: { email: DORA, name: 'dora', passwordHash } })).id;
+      admin = `Bearer ${await tokenFor(ADMIN2)}`;
+      dora = `Bearer ${await tokenFor(DORA)}`;
+      const aliceId = (await prisma.user.findUniqueOrThrow({ where: { email: ALICE } })).id;
+      team = (await http().post('/teams').set('Authorization', admin).send({ name: `Financeiro ${runId}` }).expect(201)).body.id;
+      for (const userId of [aliceId, doraId]) {
+        await http().post(`/teams/${team}/members`).set('Authorization', admin).send({ userId }).expect(204);
+      }
+      doc = (await http().post('/documents/upload').set('Authorization', alice).attach('file', fixture('doc-b.pdf')).expect(201)).body.id;
+      await processed();
+      await http().put(`/documents/${doc}/shares`).set('Authorization', alice).send({ teamIds: [team] }).expect(200);
+      await http().post(`/documents/${doc}/ask`).set('Authorization', alice).send({ question: 'secret question' }).expect(201);
+    });
+
+    it('is for administrators only', async () => {
+      await http().get('/admin/overview').set('Authorization', alice).expect(403);
+      await http().delete(`/admin/teams/${team}/documents/${doc}`).set('Authorization', alice).expect(403);
+    });
+
+    it('shows health, teams with shared document names and usage counts, never content', async () => {
+      const { body } = await http().get('/admin/overview').set('Authorization', admin).expect(200);
+      expect(body.health.database.ok).toBe(true);
+      expect(body.health.llm).toMatchObject({ reachable: true, modelInstalled: true });
+      // counts over the whole database (shared with development), so only their shape is checked
+      expect(body.health.queue).toEqual({ queued: expect.any(Number), reading: expect.any(Number), writingExplanation: expect.any(Number) });
+      expect(body.health.storage.uploadsBytes).toBeGreaterThan(0);
+
+      const finance = body.teams.find((t: { id: string }) => t.id === team);
+      expect(finance.documents).toEqual([
+        expect.objectContaining({ id: doc, name: 'doc-b.pdf', owner: ALICE.split('@')[0], status: 'COMPLETED' }),
+      ]);
+      expect(body.usage.find((u: { email: string }) => u.email === DORA).documents).toBe(0);
+      expect(body.usage.find((u: { email: string }) => u.email === ALICE).documents).toBeGreaterThan(0);
+
+      const raw = JSON.stringify(body);
+      expect(raw).not.toContain('secret question');
+      expect(raw).not.toContain('EXPLANATION OF');
+      expect(raw).not.toMatch(/extractedText|filePath/);
+    });
+
+    it('removes a sharing: the team loses access, the owner keeps the document', async () => {
+      await http().get(`/documents/${doc}`).set('Authorization', dora).expect(200);
+      await http().delete(`/admin/teams/${team}/documents/${doc}`).set('Authorization', admin).expect(204);
+      await http().delete(`/admin/teams/${team}/documents/${doc}`).set('Authorization', admin).expect(404);
+      await http().get(`/documents/${doc}`).set('Authorization', dora).expect(404);
       await http().get(`/documents/${doc}`).set('Authorization', alice).expect(200);
     });
   });

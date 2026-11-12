@@ -46,6 +46,7 @@ export default function Home() {
       </div>
       <div className="button-row">
         {isAdmin && <Link href="/users" className="button-link">{t('home.users')}</Link>}
+        {isAdmin && <Link href="/admin" className="button-link">{t('home.panel')}</Link>}
         <Link href="/account" className="button-link">{t('home.account')}</Link>
         <button onClick={() => signOut({ callbackUrl: '/login' })}>{t('home.logout')}</button>
       </div>

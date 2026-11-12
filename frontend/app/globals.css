@@ -591,3 +591,36 @@ button.danger:hover {
 .access-line {
   margin: 4px 0 12px;
 }
+
+/* Admin panel */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0;
+}
+th,
+td {
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--ink);
+  text-align: left;
+  vertical-align: middle;
+}
+th {
+  text-transform: uppercase;
+  font-weight: normal;
+}
+td button {
+  padding: 0 8px;
+}
+.health dd {
+  margin: 0;
+}
+.warning-text {
+  color: var(--amber-ink);
+}
+.shared-docs {
+  margin: 8px 0;
+}
+.shared-docs summary {
+  cursor: pointer;
+}

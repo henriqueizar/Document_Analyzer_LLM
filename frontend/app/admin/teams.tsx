@@ -1,8 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 import { apiFetch, errorMessage } from '@/lib/api';
-import { useI18n } from '@/lib/i18n';
+import { useI18n, type MessageKey } from '@/lib/i18n';
 
 interface Member {
   id: string;
@@ -10,58 +10,52 @@ interface Member {
   email: string;
 }
 
-interface Team {
+export interface SharedDocument {
+  id: string;
+  name: string;
+  owner: string;
+  sharedAt: string;
+  status: string;
+  explanationStatus: string | null;
+}
+
+export interface Team {
   id: string;
   name: string;
   members: Member[];
-  sharedDocuments: number;
+  /** Names, owners, dates and status only: never the content. */
+  documents: SharedDocument[];
 }
 
-interface UserOption {
+export interface UserOption {
   id: string;
   name: string | null;
   email: string;
 }
 
-async function fetchTeams(): Promise<Team[]> {
-  const res = await apiFetch('/teams');
-  if (!res.ok) throw new Error(await errorMessage(res));
-  return res.json();
-}
-
 /**
- * Teams, managed by administrators. The administrator sees who is in each team
- * and how many documents are shared with it, never the documents themselves.
+ * Teams, managed by administrators: members, and the documents shared with
+ * each team (name, owner, date and status, never the content).
  */
-export default function TeamsSection({ users }: { users: UserOption[] }) {
+export default function TeamsSection({
+  teams,
+  users,
+  reload,
+}: {
+  teams: Team[];
+  users: UserOption[];
+  reload: () => Promise<unknown>;
+}) {
   const { t, server } = useI18n();
-  const [teams, setTeams] = useState<Team[] | null>(null);
   const [name, setName] = useState('');
   const [error, setError] = useState<string | null>(null);
-
-  const load = useCallback(
-    () =>
-      fetchTeams().then(setTeams, (e: Error) => setError(server(e.message))),
-    [server],
-  );
-
-  useEffect(() => {
-    let cancelled = false;
-    fetchTeams().then(
-      (list) => !cancelled && setTeams(list),
-      (e: Error) => !cancelled && setError(server(e.message)),
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, [server]);
 
   /** Runs a change and reloads; errors are shown under the section title. */
   async function change(request: Promise<Response>) {
     setError(null);
     const res = await request;
     if (!res.ok) setError(server(await errorMessage(res)));
-    await load();
+    await reload();
     return res.ok;
   }
 
@@ -84,8 +78,8 @@ export default function TeamsSection({ users }: { users: UserOption[] }) {
         <small className="hint">{t('teams.intro')}</small>
       </p>
       {error && <p role="alert" className="error">{error}</p>}
-      {teams?.length === 0 && <p>{t('teams.none')}</p>}
-      {teams?.map((team) => (
+      {teams.length === 0 && <p>{t('teams.none')}</p>}
+      {teams.map((team) => (
         <TeamRow key={team.id} team={team} users={users} change={change} />
       ))}
       <form onSubmit={create} className="inline-form team-create">
@@ -173,7 +167,7 @@ function TeamRow({
           </span>
         )}
       </div>
-      <small>{t('teams.sharedCount', { count: team.sharedDocuments })}</small>
+      <SharedDocuments team={team} change={change} />
       {team.members.length === 0 ? (
         <p><small>{t('teams.noMembers')}</small></p>
       ) : (
@@ -212,4 +206,61 @@ function TeamRow({
       )}
     </div>
   );
+}
+
+function SharedDocuments({
+  team,
+  change,
+}: {
+  team: Team;
+  change: (request: Promise<Response>) => Promise<boolean>;
+}) {
+  const { t, language } = useI18n();
+  if (team.documents.length === 0) {
+    return <p><small>{t('admin.noShared')}</small></p>;
+  }
+  function unshare(doc: SharedDocument) {
+    if (!window.confirm(t('admin.unshareConfirm', { name: doc.name, team: team.name }))) return;
+    change(apiFetch(`/admin/teams/${team.id}/documents/${doc.id}`, { method: 'DELETE' }));
+  }
+  return (
+    <details className="shared-docs">
+      <summary>{t('teams.sharedCount', { count: team.documents.length })}</summary>
+      <table>
+        <thead>
+          <tr>
+            <th>{t('admin.document')}</th>
+            <th>{t('admin.owner')}</th>
+            <th>{t('admin.sharedAt')}</th>
+            <th>{t('admin.status')}</th>
+            <th />
+          </tr>
+        </thead>
+        <tbody>
+          {team.documents.map((d) => (
+            <tr key={d.id}>
+              <td>{d.name}</td>
+              <td>{d.owner}</td>
+              <td>{new Date(d.sharedAt).toLocaleDateString(language === 'pt' ? 'pt-BR' : 'en')}</td>
+              <td>{t(statusKey(d))}</td>
+              <td>
+                <button type="button" onClick={() => unshare(d)}>
+                  {t('admin.unshare')}
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </details>
+  );
+}
+
+function statusKey(d: SharedDocument): MessageKey {
+  if (d.status === 'PENDING') return 'status.queue';
+  if (d.status === 'PROCESSING') return 'status.reading';
+  if (d.status === 'FAILED') return 'status.failed';
+  if (d.explanationStatus === 'PENDING' || d.explanationStatus === 'PROCESSING') return 'status.writing';
+  if (d.explanationStatus === 'FAILED') return 'status.readyNoExplanation';
+  return 'status.ready';
 }

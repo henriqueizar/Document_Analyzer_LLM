@@ -86,6 +86,13 @@ Local accounts only; no external identity provider.
   Members see the file and the explanation and have their own chat
   (`LlmInteraction.userId`); only the owner reprocesses, deletes or changes the sharing.
   Without teams, nothing about sharing is shown.
+- **Admin panel** (`GET /admin/overview`, administrators only): database and Ollama
+  health (is the configured model installed?), processing queue, failures, disk usage;
+  teams with the names, owners, dates and status of the documents shared with them
+  (removable); documents per person as a count. Never content, questions or answers.
+- The e2e tests share the development database and remove everything they create when
+  they finish (users on example.com with a run timestamp, their documents and files, and
+  the teams named after the run), including leftovers of earlier runs.
 - Uploaded files are not public: they are served by `GET /documents/:id/file` to their
   owner only.
 
