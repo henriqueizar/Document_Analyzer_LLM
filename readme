@@ -74,9 +74,12 @@ Model, context size and timeout are set in `backend/.env` (`LLM_MODEL`, `LLM_NUM
 ```bash
 cd backend
 npm install
-npx prisma migrate dev
 npm run start:dev
 ```
+
+`npm run start:dev` first applies pending database migrations and regenerates the Prisma
+client (`npm run db:update`), so after a `git pull` you only need to restart it. The
+database (`docker compose up -d`) must be running.
 
 Backend runs on http://localhost:3000
 
