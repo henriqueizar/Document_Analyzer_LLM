@@ -2,7 +2,9 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
   Param,
   Post,
   StreamableFile,
@@ -18,6 +20,7 @@ import { createReadStream } from 'fs';
 
 import { DocumentsService } from './documents.service';
 import { isSupportedUpload } from '../common/supported-files';
+import { normalizeFileName } from '../common/file-names';
 import { AuthGuard, type AuthUser } from '../auth/auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 
@@ -39,8 +42,11 @@ export class DocumentsController {
           cb(null, uniqueSuffix + extname(file.originalname).toLowerCase());
         },
       }),
+      // File names arrive as UTF-8 (multer's default would read them as Latin-1).
+      defParamCharset: 'utf8',
       limits: { fileSize: MAX_UPLOAD_BYTES },
       fileFilter: (_, file, cb) => {
+        file.originalname = normalizeFileName(file.originalname);
         if (isSupportedUpload(file.originalname, file.mimetype)) {
           cb(null, true);
         } else {
@@ -64,19 +70,29 @@ export class DocumentsController {
     return this.documentsService.create(user.email, file);
   }
 
+  /** Read again and re-explain, in the background (202: queued). */
   @Post(':id/process')
-  async process(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    await this.documentsService.process(id, user.email);
-    return { message: 'Processing completed' };
+  @HttpCode(202)
+  process(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.documentsService.process(id, user.email);
+  }
+
+  /** Write the automatic explanation again, in the background. */
+  @Post(':id/explain')
+  @HttpCode(202)
+  explain(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.documentsService.explain(id, user.email);
   }
 
   @Post(':id/ask')
   async ask(
     @Param('id') id: string,
     @Body('question') question: string,
+    @Body('interpret') interpret: unknown,
     @CurrentUser() user: AuthUser,
   ) {
-    return this.documentsService.ask(id, question, user.email);
+    // interpretation only when explicitly requested
+    return this.documentsService.ask(id, question, user.email, interpret === true);
   }
 
   /** Authenticated replacement for the old public /uploads static route. */
@@ -87,6 +103,13 @@ export class DocumentsController {
       type: mimeType,
       disposition: 'inline',
     });
+  }
+
+  /** Permanently deletes the document, its file and all its interactions. */
+  @Delete(':id')
+  @HttpCode(204)
+  async remove(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    await this.documentsService.remove(id, user.email);
   }
 
   @Get(':id')

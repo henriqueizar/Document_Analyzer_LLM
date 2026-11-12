@@ -3,15 +3,16 @@
 import { useSession } from 'next-auth/react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { apiFetch, errorMessage } from '@/lib/api';
+import LoadingDots from '../loading-dots';
 
 // Must match backend/src/common/supported-files.ts and the upload size limit.
 const ACCEPT = '.pdf,.png,.jpg,.jpeg,.webp,.bmp,.tif,.tiff';
 const SUPPORTED = /\.(pdf|png|jpe?g|webp|bmp|tiff?)$/i;
 const MAX_BYTES = 20 * 1024 * 1024;
 
-type Phase = 'idle' | 'uploading' | 'processing';
+type Phase = 'idle' | 'uploading';
 
 function formatSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
@@ -37,18 +38,8 @@ export default function UploadPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [docId, setDocId] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
-  const [dots, setDots] = useState('');
 
   const busy = phase !== 'idle';
-
-  useEffect(() => {
-    // "Uploading..." animation
-    if (!busy) return;
-    const interval = setInterval(() => {
-      setDots((prev) => (prev.length < 3 ? prev + '.' : ''));
-    }, 500);
-    return () => clearInterval(interval);
-  }, [busy]);
 
   if (status === 'loading') {
     return <p>Loading session...</p>;
@@ -58,7 +49,7 @@ export default function UploadPage() {
     return (
       <div className="centered">
         <p>You must be logged in to upload documents.</p>
-        <Link href="/">Go to login</Link>
+        <Link href="/login">Go to login</Link>
       </div>
     );
   }
@@ -94,12 +85,7 @@ export default function UploadPage() {
       const uploadedId = (await uploadRes.json()).id as string;
       setDocId(uploadedId);
 
-      setPhase('processing');
-      const processRes = await apiFetch(`/documents/${uploadedId}/process`, {
-        method: 'POST',
-      });
-      if (!processRes.ok) throw new Error(await errorMessage(processRes));
-
+      // Reading and explaining run in the background; the document page shows progress.
       router.push(`/documents/${uploadedId}`);
     } catch (err) {
       console.error(err);
@@ -108,12 +94,7 @@ export default function UploadPage() {
     }
   }
 
-  const label =
-    phase === 'uploading'
-      ? 'Uploading'
-      : phase === 'processing'
-        ? 'Processing (OCR + LLM)'
-        : 'Upload';
+  const label = phase === 'uploading' ? 'Uploading' : 'Upload';
 
   return (
     <div className="centered">
@@ -136,7 +117,7 @@ export default function UploadPage() {
         >
           {file ? 'Change file' : 'Select file'}
         </label>
-        <small>PDF or image, up to 20 MB. You can also drop a file on the button.</small>
+        <small>Choose or drag your PDF/image here (max. 20MB)</small>
 
         <input
           id="file-upload"
@@ -158,15 +139,9 @@ export default function UploadPage() {
 
         <button type="submit" disabled={!file || busy}>
           {label}
-          {busy && (
-            <span style={{ display: 'inline-block', width: '3ch', textAlign: 'left' }}>
-              {dots}
-            </span>
-          )}
+          {busy && <LoadingDots />}
         </button>
-        {phase === 'processing' && (
-          <small>Reading the document and writing the explanation. This can take a minute.</small>
-        )}
+        <small>After uploading, the document opens and is read in the background.</small>
       </form>
 
       {message && <p role="alert">{message}</p>}

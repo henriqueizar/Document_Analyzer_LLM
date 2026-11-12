@@ -1,13 +1,12 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import {
-  BadRequestException,
-  ConflictException,
-  NotFoundException,
-  UnprocessableEntityException,
-} from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { DocumentsService } from './documents.service';
+import { existsSync } from 'fs';
+import { mkdtemp, writeFile } from 'fs/promises';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { PrismaService } from '../prisma/prisma.service';
-import { OcrService } from '../ocr/ocr.service';
+import { ProcessingService } from './processing.service';
 import { LlmService } from '../llm/llm.service';
 
 const OWNER = 'alice@example.com';
@@ -27,9 +26,12 @@ function makePrisma(originalName: string, overrides: Record<string, unknown> = {
   return {
     document: {
       findFirst: jest.fn().mockResolvedValue(doc),
+      delete: jest.fn().mockResolvedValue(doc),
       update: jest.fn().mockImplementation(({ data }) => Promise.resolve({ ...doc, ...data })),
     },
+    $transaction: jest.fn(async (ops: Promise<unknown>[]) => Promise.all(ops)),
     llmInteraction: {
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
       create: jest.fn().mockResolvedValue({}),
       findMany: jest.fn().mockResolvedValue([]),
     },
@@ -40,74 +42,32 @@ function makePrisma(originalName: string, overrides: Record<string, unknown> = {
 describe('DocumentsService', () => {
   let service: DocumentsService;
   let prisma: ReturnType<typeof makePrisma>;
-  let ocr: { recognizePdf: jest.Mock; extractText: jest.Mock };
+  let processing: { enqueue: jest.Mock; isQueued: jest.Mock };
   let llm: { explainDocument: jest.Mock; askQuestion: jest.Mock };
 
   async function build(originalName: string, overrides: Record<string, unknown> = {}) {
     prisma = makePrisma(originalName, overrides);
-    ocr = {
-      recognizePdf: jest.fn().mockResolvedValue('pdf text'),
-      extractText: jest.fn().mockResolvedValue('image text'),
-    };
+    processing = { enqueue: jest.fn(), isQueued: jest.fn().mockReturnValue(false) };
     llm = {
-      explainDocument: jest.fn().mockResolvedValue('explanation'),
-      askQuestion: jest.fn().mockResolvedValue('answer'),
+      explainDocument: jest.fn().mockResolvedValue({ text: 'explanation', sources: [{ page: 1, text: 'src' }] }),
+      askQuestion: jest.fn().mockResolvedValue({ text: 'answer', sources: [{ page: 1, text: 'src' }] }),
     };
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         DocumentsService,
         { provide: PrismaService, useValue: prisma },
-        { provide: OcrService, useValue: ocr },
+        { provide: ProcessingService, useValue: processing },
         { provide: LlmService, useValue: llm },
       ],
     }).compile();
     service = module.get(DocumentsService);
   }
 
-  it('routes an upper-case .PDF to the PDF pipeline', async () => {
-    await build('SCAN.PDF');
-    await service.process('doc-1', OWNER);
-    expect(ocr.recognizePdf).toHaveBeenCalled();
-    expect(ocr.extractText).not.toHaveBeenCalled();
-  });
-
-  it('routes images to image OCR and stores the explanation', async () => {
-    await build('photo.JPG');
-    await service.process('doc-1', OWNER);
-    expect(ocr.extractText).toHaveBeenCalled();
-    expect(llm.explainDocument).toHaveBeenCalledWith({ name: 'photo.JPG', text: 'image text' });
-    expect(prisma.llmInteraction.create).toHaveBeenCalled();
-  });
-
-  it('marks unsupported files as FAILED without calling OCR', async () => {
-    await build('notes.txt');
-    const result = service.process('doc-1', OWNER);
-    await expect(result).rejects.toBeInstanceOf(UnprocessableEntityException);
-    await expect(result).rejects.toThrow(/Unsupported file type/);
-    expect(ocr.extractText).not.toHaveBeenCalled();
-    expect(prisma.document.update).toHaveBeenLastCalledWith({
-      where: { id: 'doc-1' },
-      data: { status: 'FAILED' },
-    });
-  });
-
   describe('HTTP errors', () => {
     it('process: 404 for an unknown document', async () => {
       await build('a.png');
       prisma.document.findFirst.mockResolvedValue(null);
       await expect(service.process('nope', OWNER)).rejects.toBeInstanceOf(NotFoundException);
-    });
-
-    it('process: OCR failure marks FAILED and returns 422', async () => {
-      await build('a.png');
-      ocr.extractText.mockRejectedValue(new Error('OCR failed for a.png'));
-      await expect(service.process('doc-1', OWNER)).rejects.toBeInstanceOf(
-        UnprocessableEntityException,
-      );
-      expect(prisma.document.update).toHaveBeenLastCalledWith({
-        where: { id: 'doc-1' },
-        data: { status: 'FAILED' },
-      });
     });
 
     it('ask: 404 for an unknown document', async () => {
@@ -134,6 +94,7 @@ describe('DocumentsService', () => {
         { name: 'a.png', text: 'text' },
         'What is the total?',
         [],
+        'STRICT',
       );
       expect(prisma.llmInteraction.create).toHaveBeenCalled();
     });
@@ -166,7 +127,7 @@ describe('DocumentsService', () => {
       await expect(service.process('doc-1', 'mallory@example.com')).rejects.toBeInstanceOf(
         NotFoundException,
       );
-      expect(ocr.extractText).not.toHaveBeenCalled();
+      expect(processing.enqueue).not.toHaveBeenCalled();
       expect(llm.askQuestion).not.toHaveBeenCalled();
     });
 
@@ -177,8 +138,35 @@ describe('DocumentsService', () => {
       expect(document).not.toHaveProperty('filename');
     });
 
-    it('refuses to re-process a document that is already PROCESSING', async () => {
+    it('refuses to re-process a document that is already being processed', async () => {
       await build('a.png', { status: 'PROCESSING' });
+      await expect(service.process('doc-1', OWNER)).rejects.toBeInstanceOf(ConflictException);
+    });
+  });
+
+  describe('background processing', () => {
+    it('process queues the document again and returns at once', async () => {
+      await build('a.png', { status: 'FAILED', failureReason: 'old' });
+      const doc = await service.process('doc-1', OWNER);
+      expect(doc).toMatchObject({ status: 'PENDING', failureReason: null });
+      expect(processing.enqueue).toHaveBeenCalledWith('doc-1');
+    });
+
+    it('explain re-queues only the explanation of a document that was read', async () => {
+      await build('a.png', { status: 'COMPLETED', extractedText: 't', explanationStatus: 'FAILED' });
+      const doc = await service.explain('doc-1', OWNER);
+      expect(doc).toMatchObject({ status: 'COMPLETED', explanationStatus: 'PENDING' });
+      expect(processing.enqueue).toHaveBeenCalledWith('doc-1');
+    });
+
+    it('explain refuses a document that has not been read', async () => {
+      await build('a.png', { status: 'FAILED' });
+      await expect(service.explain('doc-1', OWNER)).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('refuses work on a document that is already queued', async () => {
+      await build('a.png', { status: 'COMPLETED', extractedText: 't', explanationStatus: 'COMPLETED' });
+      processing.isQueued.mockReturnValue(true);
       await expect(service.process('doc-1', OWNER)).rejects.toBeInstanceOf(ConflictException);
     });
   });
@@ -200,11 +188,68 @@ describe('DocumentsService', () => {
     ]);
     await service.ask('doc-1', 'q3', OWNER);
     expect(prisma.llmInteraction.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { documentId: 'doc-1', role: 'QUESTION' }, take: 3 }),
+      expect.objectContaining({ where: { documentId: 'doc-1', role: 'QUESTION' }, take: 50 }),
     );
-    expect(llm.askQuestion).toHaveBeenCalledWith(expect.anything(), 'q3', [
-      { question: 'q1', answer: 'a1 [p. 1]' },
-      { question: 'q2', answer: 'a2 [p. 1]' },
-    ]);
+    expect(llm.askQuestion).toHaveBeenCalledWith(
+      expect.anything(),
+      'q3',
+      [
+        { question: 'q1', answer: 'a1 [p. 1]' },
+        { question: 'q2', answer: 'a2 [p. 1]' },
+      ],
+      'STRICT',
+    );
+  });
+
+  describe('deletion', () => {
+    it('deletes the interactions, the document and the file', async () => {
+      const dir = await mkdtemp(join(tmpdir(), 'del-'));
+      const file = join(dir, 'doc.pdf');
+      await writeFile(file, 'x');
+      await build('a.pdf', { status: 'COMPLETED', extractedText: 't', explanationStatus: 'COMPLETED', filePath: file });
+      await service.remove('doc-1', OWNER);
+      expect(prisma.llmInteraction.deleteMany).toHaveBeenCalledWith({ where: { documentId: 'doc-1' } });
+      expect(prisma.document.delete).toHaveBeenCalledWith({ where: { id: 'doc-1' } });
+      expect(existsSync(file)).toBe(false);
+    });
+
+    it("answers 404 for another user's document and deletes nothing", async () => {
+      await build('a.pdf');
+      prisma.document.findFirst.mockResolvedValue(null);
+      await expect(service.remove('doc-1', 'mallory@example.com')).rejects.toBeInstanceOf(NotFoundException);
+      expect(prisma.document.delete).not.toHaveBeenCalled();
+    });
+
+    it('refuses while the document is being processed', async () => {
+      await build('a.pdf', { status: 'PROCESSING' });
+      await expect(service.remove('doc-1', OWNER)).rejects.toBeInstanceOf(ConflictException);
+      expect(prisma.document.delete).not.toHaveBeenCalled();
+    });
+
+    it('still succeeds when the file was already gone', async () => {
+      await build('a.pdf', { status: 'FAILED', filePath: '/nonexistent/file.pdf' });
+      await expect(service.remove('doc-1', OWNER)).resolves.toBeUndefined();
+    });
+  });
+
+  describe('answer modes', () => {
+    it('stores interpretation answers as such when explicitly requested', async () => {
+      await build('a.png', { status: 'COMPLETED', extractedText: 'text' });
+      await service.ask('doc-1', 'Quais os riscos?', OWNER, true);
+      expect(llm.askQuestion).toHaveBeenCalledWith(expect.anything(), 'Quais os riscos?', [], 'INTERPRETATION');
+      expect(prisma.llmInteraction.create).toHaveBeenCalledWith({ data: expect.objectContaining({ mode: 'INTERPRETATION' }) });
+    });
+
+    it('marks earlier interpretations in the history so they are not read as document facts', async () => {
+      await build('a.png', { status: 'COMPLETED', extractedText: 'text' });
+      prisma.llmInteraction.findMany.mockResolvedValue([{ question: 'q1', answer: 'parece arriscado', mode: 'INTERPRETATION' }]);
+      await service.ask('doc-1', 'q2', OWNER);
+      expect(llm.askQuestion).toHaveBeenCalledWith(
+        expect.anything(),
+        'q2',
+        [{ question: 'q1', answer: '[interpretation] parece arriscado' }],
+        'STRICT',
+      );
+    });
   });
 });

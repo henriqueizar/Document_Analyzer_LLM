@@ -16,7 +16,6 @@ local LLM, and ask questions about it.
 - Docker (Docker Desktop on macOS/Windows)
 - [Ollama](https://ollama.com) — on macOS install the native app (`brew install ollama`
   or the installer); it uses the Apple GPU. Docker on macOS cannot use the GPU.
-- A Google OAuth client (for sign-in)
 
 No ImageMagick, GraphicsMagick or Ghostscript is needed: PDFs are read and rendered
 in Node.
@@ -40,8 +39,6 @@ Fill in:
 
 - `BACKEND_JWT_SECRET` — the **same** value in both files (`openssl rand -base64 32`).
 - `NEXTAUTH_SECRET` — another random value (`openssl rand -base64 32`).
-- `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` — from Google Cloud Console. The
-  authorized redirect URI is `http://localhost:3001/api/auth/callback/google`.
 
 3. Start PostgreSQL
 
@@ -77,9 +74,12 @@ Model, context size and timeout are set in `backend/.env` (`LLM_MODEL`, `LLM_NUM
 ```bash
 cd backend
 npm install
-npx prisma migrate dev
 npm run start:dev
 ```
+
+`npm run start:dev` first applies pending database migrations and regenerates the Prisma
+client (`npm run db:update`), so after a `git pull` you only need to restart it. The
+database (`docker compose up -d`) must be running.
 
 Backend runs on http://localhost:3000
 
@@ -95,9 +95,15 @@ Frontend runs on http://localhost:3001
 
 7. Usage
 
-Open http://localhost:3001, sign in with Google, upload a document (PDF or image),
-wait for the automatic explanation, then ask questions. Previous documents and chats
-are under "My documents".
+Open http://localhost:3001. On the first run the app asks you to **create the
+administrator account** (if you use the app alone, this is your account). Then upload a
+document (PDF or image), wait for the automatic explanation and ask questions. Previous
+documents and chats are under "My documents". The administrator adds other people under
+"Users"; everyone can change their password under "Account".
+
+Accounts created with Google sign-in in earlier versions are kept with their documents:
+the administrator sets a password for them under "Users" (or, for your own account, use
+the same e-mail when creating the administrator).
 
 ### Tests
 
@@ -119,13 +125,23 @@ LLM_NUM_CTX=4096 npm run eval:llm    # small context: exercises passage selectio
 It asks factual questions (which must be answered with page citations) and questions
 the document cannot answer (which must be refused), and prints PASS/FAIL per case.
 
+To check that the application works with no internet access (needs Docker):
+
+```bash
+npm run verify:offline
+```
+
+It runs the end-to-end test (login, upload, real OCR, questions) in a container on a
+Docker network with no route to the internet, after proving that the container cannot
+reach any external host. See `docs/privacidade-lgpd.md` and the in-app Privacy page.
+
 ## Development details
 
 ### Architecture
 
 Two independent services:
 
-- Frontend (http://localhost:3001): Next.js, Google sign-in with NextAuth, upload UI,
+- Frontend (http://localhost:3001): Next.js, local sign-in with NextAuth, upload UI,
   document view and chat.
 - Backend (http://localhost:3000): NestJS API for OCR, LLM interaction and persistence
   (Prisma + PostgreSQL in Docker).
@@ -139,29 +155,44 @@ is used instead.
 
 ### Authentication
 
-- Users sign in on the frontend with Google (NextAuth).
+Local accounts only; no external identity provider.
+
+- **First run:** while no administrator exists, the app shows a setup screen that creates
+  one (`POST /auth/setup`, refused once an administrator exists). Do it right after
+  installing.
+- **Sign-in:** e-mail and password, checked by the backend (`POST /auth/login`).
+  Passwords are stored as salted scrypt hashes, never in plain text. After 5 failed
+  attempts an e-mail is blocked for 15 minutes. Sessions last 12 hours.
+- **Roles:** administrators add users and reset passwords under "Users"; every user can
+  change their own password under "Account".
 - The frontend route `/api/backend-token` checks the NextAuth session on the server and
   issues a short-lived (5 min) token signed with `BACKEND_JWT_SECRET`. The browser
   sends it to the backend as `Authorization: Bearer <token>`.
-- The backend verifies the token on every `/documents` route and only ever returns the
+- The backend verifies the token and looks the account up on every request (a removed
+  account or a changed role takes effect immediately), and only ever returns the
   caller's own documents (another user's document is a 404).
 - Uploaded files are not public: they are served by `GET /documents/:id/file` to their
   owner only.
-- Users are created automatically (upsert) on their first upload.
 
 ### Processing flow
 
-1. User uploads a document (PDF or image, max 20 MB; other types are rejected with 400)
-2. Document is stored and marked as PENDING
-3. `POST /documents/:id/process` extracts the text (PROCESSING)
-4. Status becomes COMPLETED, or FAILED with a 422 and the reason
-5. The extracted text is explained by the LLM
-6. The user can ask questions about the document
-7. All interactions are stored for history
+1. User uploads a document (PDF or image, max 20 MB; other types are rejected with 400).
+   The upload returns at once and the document page opens.
+2. In the background, one document at a time (OCR and the local LLM are heavy):
+   - **reading**: in the queue -> reading (text layer / OCR) -> ready, or failed with the
+     reason shown on the page;
+   - **explanation**: written by the LLM once reading succeeded. If the LLM is unavailable
+     only the explanation fails ("Retry explanation"); the document stays open to
+     questions.
+3. The page and the "My documents" list update by themselves while work is in progress.
+4. "Reprocess" reads the document and writes the explanation again (e.g. after changing
+   the model); questions and answers are kept. Work interrupted by a restart is resumed
+   when the backend starts.
 
 ### Text extraction
 
-- Images: Tesseract.js OCR.
+- Images: Tesseract OCR (tesseract.js 7 / Tesseract 5) with Portuguese and English models
+  (`OCR_LANGUAGES`, default `por+eng`), loaded from `backend/*.traineddata`, never downloaded.
 - PDFs: every page is processed (up to `MAX_PDF_PAGES`, default 50). Pages with an
   embedded text layer use it directly (fast and exact); scanned pages are rendered in
   memory and OCR'd. No temporary files are written, so concurrent uploads cannot mix.
@@ -182,11 +213,25 @@ The assistant answers **only from the document**. Defences against hallucination
   dates verbatim, ignore instructions written inside documents, and reply with a fixed
   sentence ("Não encontrei essa informação no documento.") when the answer is not there.
 - **Temperature 0**, thinking mode off for reasoning models.
+- **Two answer modes.** By default (strict) the assistant answers only what the document
+  states: it does not pick answers to exercises in the document, give opinions or draw
+  conclusions, and it refuses small talk. An answer that cannot be tied to the document
+  (no citation, and no sentence that clearly matches a passage) is replaced by the
+  refusal sentence by the application. Interpretation is available only when the user
+  ticks "Interpret" for a question (it turns itself off after sending): the model may
+  then analyse, separating "No documento" (cited facts) from "Interpretação", and the
+  application shows the answer in a box labelled as interpretation.
+- **Clickable citations:** every `[p. N]` opens, under the answer, the exact text from
+  page N that the model was given (stored with each answer), with the matching sentence
+  highlighted; for PDFs, "Show page N in the PDF" opens the viewer at that page. When a
+  model piles its citations at the end, the application (not the model) gives each
+  sentence the page of the passage it clearly matches, or none.
 - **Automatic check after every answer:** cited pages must be among those provided,
   every multi-digit number must appear in the document, and answers must cite a page.
   Otherwise the answer is shown with a highlighted warning.
-- The last 3 questions and answers are sent as context for follow-ups (never as a
-  source).
+- Earlier questions and answers are sent as conversation context (never as a source):
+  the whole conversation when it is short, otherwise the most recent turns that fit in
+  a quarter of the context window.
 
 No technique removes hallucinations completely; these reduce them and make the rest
 visible. Known limit: keyword selection does not match across languages (an English

@@ -1,17 +1,19 @@
 import {
   BadRequestException,
   ConflictException,
-  HttpException,
   Injectable,
   Logger,
   NotFoundException,
-  UnprocessableEntityException,
+  OnModuleInit,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { OcrService } from '../ocr/ocr.service';
 import * as path from 'path';
+import * as fs from 'fs/promises';
 import { LlmService } from '../llm/llm.service';
-import { isImage, isPdf } from '../common/supported-files';
+import { ProcessingService } from './processing.service';
+import type { AnswerMode } from '../llm/prompts';
+import { repairMisdecodedName } from '../common/file-names';
 import { stripPreamble } from '../llm/clean-response';
 
 const MIME_BY_EXTENSION: Record<string, string> = {
@@ -26,14 +28,34 @@ const MIME_BY_EXTENSION: Record<string, string> = {
 };
 
 @Injectable()
-export class DocumentsService {
+export class DocumentsService implements OnModuleInit {
   private readonly logger = new Logger(DocumentsService.name);
 
   constructor(
     private prisma: PrismaService,
-    private ocrService: OcrService,
     private llmService: LlmService,
+    private processing: ProcessingService,
   ) {}
+
+  /**
+   * Names uploaded before the UTF-8 fix were stored wrongly decoded
+   * ("3Âª EDICÌ§AÌO.pdf"). Repaired once on start; correct names are untouched.
+   */
+  async onModuleInit() {
+    // Mis-decoded Portuguese accents (ª, ç, ã, é, ó, and the combining accents of
+    // macOS file names) all start with one of these Latin-1 characters.
+    const suspects = await this.prisma.document.findMany({
+      where: { OR: ['Â', 'Ã', 'Ì', 'Í'].map((c) => ({ originalName: { contains: c } })) },
+      select: { id: true, originalName: true },
+    });
+    for (const doc of suspects) {
+      const fixed = repairMisdecodedName(doc.originalName);
+      if (fixed) {
+        await this.prisma.document.update({ where: { id: doc.id }, data: { originalName: fixed } });
+        this.logger.log(`Repaired file name: ${fixed}`);
+      }
+    }
+  }
 
   async create(userEmail: string, file: Express.Multer.File) {
     if (!userEmail) {
@@ -54,81 +76,80 @@ export class DocumentsService {
         status: 'PENDING',
       },
     });
+    // Reading and explaining run in the background; the page shows progress.
+    this.processing.enqueue(document.id);
     return this.toPublic(document);
   }
 
+  /**
+   * Reads the document again and writes a new explanation (retry after a
+   * failure, or after changing the OCR/LLM). Questions and answers are kept.
+   * Runs in the background: returns at once with the queued document.
+   */
   async process(documentId: string, userEmail: string) {
     const document = await this.findOwned(documentId, userEmail);
-    if (document.status === 'PROCESSING') {
-      throw new ConflictException('Document is already being processed');
+    if (this.busy(document)) {
+      throw new ConflictException('This document is already being processed.');
     }
+    const queued = await this.prisma.document.update({
+      where: { id: documentId },
+      data: { status: 'PENDING', failureReason: null, explanationStatus: null, explanationError: null },
+    });
+    this.processing.enqueue(documentId);
+    return this.toPublic(queued);
+  }
 
+  /** Writes the automatic explanation again (e.g. after the LLM was unavailable). */
+  async explain(documentId: string, userEmail: string) {
+    const document = await this.findOwned(documentId, userEmail);
+    if (document.status !== 'COMPLETED') {
+      throw new ConflictException('The document must be read before it can be explained.');
+    }
+    if (this.busy(document)) {
+      throw new ConflictException('This document is already being processed.');
+    }
+    const queued = await this.prisma.document.update({
+      where: { id: documentId },
+      data: { explanationStatus: 'PENDING', explanationError: null },
+    });
+    this.processing.enqueue(documentId);
+    return this.toPublic(queued);
+  }
+
+  /**
+   * Deletes the document permanently: the uploaded file, the extracted text and
+   * every explanation, question and answer (LGPD right to erasure, art. 18).
+   * Refused while the document is being processed, so nothing is left half-done.
+   */
+  async remove(documentId: string, userEmail: string): Promise<void> {
+    const document = await this.findOwned(documentId, userEmail);
+    if (this.busy(document)) {
+      throw new ConflictException('This document is being processed. Wait for it to finish, then delete it.');
+    }
+    await this.prisma.$transaction([
+      this.prisma.llmInteraction.deleteMany({ where: { documentId } }),
+      this.prisma.document.delete({ where: { id: documentId } }),
+    ]);
     try {
-      await this.prisma.document.update({
-        where: { id: documentId },
-        data: { status: 'PROCESSING' },
-      });
-
-      const fullPath = path.resolve(document.filePath);
-
-      let text = '';
-      if (isPdf(document.originalName)) {
-        text = await this.ocrService.recognizePdf(fullPath);
-      } else if (isImage(document.originalName)) {
-        text = await this.ocrService.extractText(fullPath);
-      } else {
-        throw new UnprocessableEntityException(
-          `Unsupported file type: ${document.originalName}`,
-        );
-      }
-
-      // save the extracted text
-      const updatedDocument = await this.prisma.document.update({
-        where: { id: documentId },
-        data: {
-          extractedText: text,
-          status: 'COMPLETED',
-        },
-      });
-      if (!updatedDocument.extractedText) {
-        throw new UnprocessableEntityException(
-          'No text could be extracted from the document',
-        );
-      }
-
-      // automatic explanation of the document
-      const explanation = await this.llmService.explainDocument({
-        name: updatedDocument.originalName,
-        text: updatedDocument.extractedText,
-      });
-
-      // save the initial LLM interaction
-      await this.prisma.llmInteraction.create({
-        data: {
-          documentId: updatedDocument.id,
-          role: 'EXPLANATION',
-          question: '',
-          answer: explanation,
-        },
-      });
-
-      return this.toPublic(updatedDocument);
+      await fs.unlink(path.resolve(document.filePath));
     } catch (error) {
-      this.logger.error(`Processing failed for document ${documentId}`, error);
-
-      await this.prisma.document.update({
-        where: { id: documentId },
-        data: { status: 'FAILED' },
-      });
-
-      if (error instanceof HttpException) throw error;
-      throw new UnprocessableEntityException(
-        error instanceof Error ? error.message : 'Document processing failed',
-      );
+      // already gone is fine; anything else is logged (the records are deleted)
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        this.logger.error(`Could not delete the file of document ${documentId}`, error);
+      }
     }
   }
 
-  async ask(documentId: string, question: string, userEmail: string) {
+  private busy(document: { id: string; status: string; explanationStatus: string | null }) {
+    return (
+      this.processing.isQueued(document.id) ||
+      ['PENDING', 'PROCESSING'].includes(document.status) ||
+      ['PENDING', 'PROCESSING'].includes(document.explanationStatus ?? '')
+    );
+  }
+
+  async ask(documentId: string, question: string, userEmail: string, interpret = false) {
+    const mode: AnswerMode = interpret ? 'INTERPRETATION' : 'STRICT';
     if (!question?.trim()) {
       throw new BadRequestException('Question must not be empty');
     }
@@ -142,18 +163,21 @@ export class DocumentsService {
     const previous = await this.prisma.llmInteraction.findMany({
       where: { documentId: document.id, role: 'QUESTION' },
       orderBy: { createdAt: 'desc' },
-      take: 3,
+      // the LLM keeps as many of these as fit in its history budget
+      take: 50,
     });
-    const history = previous.reverse().map((i) => ({
-      question: i.question,
+    const history = previous.reverse().map((i) => {
       // earlier automatic warnings are for the user, not for the model
-      answer: i.answer.replace(/\n*⚠[^\n]*$/u, '').trim(),
-    }));
+      const answer = i.answer.replace(/\n*⚠[^\n]*$/u, '').trim();
+      // an earlier interpretation must never be read back as a fact of the document
+      return { question: i.question, answer: i.mode === 'INTERPRETATION' ? `[interpretation] ${answer}` : answer };
+    });
 
     const answer = await this.llmService.askQuestion(
       { name: document.originalName, text: document.extractedText },
       question,
       history,
+      mode,
     );
 
     return this.prisma.llmInteraction.create({
@@ -161,7 +185,9 @@ export class DocumentsService {
         documentId: document.id,
         role: 'QUESTION',
         question,
-        answer,
+        answer: answer.text,
+        sources: answer.sources as unknown as Prisma.InputJsonValue,
+        mode,
       },
     });
   }
@@ -201,6 +227,7 @@ export class DocumentsService {
         id: true,
         originalName: true,
         status: true,
+        explanationStatus: true,
         createdAt: true,
       },
     });
@@ -225,6 +252,7 @@ export class DocumentsService {
 
   /** Strip server-side storage details before returning a document. */
   private toPublic<T extends { filePath: string; filename: string }>(document: T) {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- dropped on purpose
     const { filePath: _filePath, filename: _filename, ...rest } = document;
     return rest;
   }

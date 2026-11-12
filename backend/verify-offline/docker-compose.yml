@@ -1,0 +1,38 @@
+# Runs the backend's end-to-end test (login, upload, OCR, questions) on a
+# Docker network with NO route to the internet. Any attempt to reach an
+# external service fails, so a passing run shows the application works fully
+# offline.
+#
+#   cd backend && npm run verify:offline
+name: dollma-verify-offline
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: paggo
+      POSTGRES_PASSWORD: paggo
+      POSTGRES_DB: paggo_db
+    networks: [no-internet]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "paggo"]
+      interval: 2s
+      retries: 30
+
+  verify:
+    build:
+      context: ..
+      dockerfile: verify-offline/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://paggo:paggo@db:5432/paggo_db
+      BACKEND_JWT_SECRET: offline-verification-secret-0123456789
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [no-internet]
+    command: ["sh", "verify-offline/run.sh"]
+
+networks:
+  no-internet:
+    # internal: the network has no gateway to the outside world.
+    internal: true

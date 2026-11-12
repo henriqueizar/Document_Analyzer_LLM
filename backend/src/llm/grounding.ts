@@ -17,6 +17,66 @@ export function hasCitation(text: string): boolean {
   return new RegExp(CITATION.source, 'i').test(text);
 }
 
+/**
+ * Refusals the model words its own way ("A multa ... não está explicitamente
+ * mencionada no documento. [p. 4]"). Such an answer states only an absence,
+ * so a page citation there is misleading.
+ */
+const NEGATIVE = [
+  // (\b does not see accented letters such as the "á" of "está", hence the explicit spaces)
+  /\bn[ãa]o\s(?:[^.]{0,60}\s)?(?:est[áa]|é|s[ãa]o|foi|foram|h[áa])\s[^.]{0,40}\b(?:mencionad|especificad|informad|previst|indicad|descrit|citad|definid|estabelecid|presente|dispon[íi]ve|claro|clara)/i,
+  /\b(?:o|este|esse) documento n[ãa]o (?:menciona|informa|especifica|prev[êe]|traz|cita|define|estabelece|apresenta|cont[ée]m|diz|indica|fala)/i,
+  /\bn[ãa]o (?:h[áa]|existe|consta|constam) (?:men[çc][ãa]o|informa[çc][ãa]o|refer[êe]ncia|cl[áa]usula|previs[ãa]o)/i,
+  /\bnot (?:explicitly )?(?:mentioned|specified|stated|provided|included|defined|given|addressed)\b/i,
+  /\bthe document does(?: not|n't) (?:mention|specify|state|provide|include|define|say|address)/i,
+  /\bthere is no (?:mention|information|reference|clause|provision)\b/i,
+];
+
+/** True when every sentence of the answer only says something is absent from the document. */
+export function isNegativeOnly(answer: string): boolean {
+  const sentences = answer
+    .replace(CITATION, '')
+    .split(/(?<=[.!?])\s+/)
+    .map((x) => x.trim())
+    .filter(Boolean);
+  return sentences.length > 0 && sentences.every((x) => NEGATIVE.some((re) => re.test(x)));
+}
+
+/**
+ * Phrasings that pick an answer or judge something. In strict mode these may
+ * only repeat the document: if the document itself does not say it (an answer
+ * key, a recommendation), the claim is the model's own and is not shown.
+ * Pattern-based: it catches the common phrasings, not every possible one.
+ */
+const JUDGEMENT: RegExp[] = [
+  // choosing among options: "a alternativa correta", "resposta certa", "the correct answer"
+  /\b(?:resposta|alternativa|opcao|assertiva|afirmativa)s?\s+(?:correta|certa|verdadeira|incorreta|errada|falsa)s?\b/,
+  /\ba?\s*resposta\s+(?:da|a|para\s+a)\s+questao\s*\d+/,
+  /\bgabarito\b/,
+  /\b(?:correct|right|true|wrong|false)\s+(?:answer|option|alternative|choice|statement)s?\b/,
+  /\bthe\s+answer\s+(?:to|for|of)\s+question\s*\d+/,
+  /\banswer\s+key\b/,
+  // assessments and advice
+  /\b(?:e|seria|parece|sao|sera)\s+(?:mais\s+|muito\s+|bastante\s+)?(?:vantajos|desvantajos|recomendave|adequad|inadequad|razoave|justo|injusto|abusiv|arriscad|favorave|desfavorave|bom\b|boa\b|ruim\b)/,
+  /\b(?:recomendo|recomenda-se|sugiro|sugere-se|o\s+ideal\s+e|a\s+melhor\s+opcao|voce\s+deveria|deveria|vale\s+a\s+pena)\b/,
+  /\b(?:is|seems|would\s+be|are)\s+(?:more\s+|very\s+)?(?:advantageous|disadvantageous|reasonable|fair|unfair|abusive|risky|recommended|appropriate|favourable|favorable|good|bad)\b/,
+  /\b(?:i\s+recommend|i\s+suggest|you\s+should|the\s+best\s+option|it\s+is\s+worth)\b/,
+];
+
+/**
+ * Returns the judgement phrase an answer contains that the document itself
+ * does not contain, or null. Accents and case are ignored.
+ */
+export function unsupportedJudgement(answer: string, sourceText: string): string | null {
+  const a = normalize(answer.replace(CITATION, ''));
+  const source = normalize(sourceText);
+  for (const re of JUDGEMENT) {
+    const m = a.match(re);
+    if (m && !source.includes(m[0].trim())) return m[0].trim();
+  }
+  return null;
+}
+
 export function isNotFound(answer: string): boolean {
   const a = normalize(answer);
   return Object.values(NOT_FOUND).some((phrase) =>

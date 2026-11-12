@@ -13,11 +13,23 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum Role {
+  ADMIN
+  USER
+}
+
 model User {
-  id        String     @id @default(uuid())
-  email     String     @unique
-  documents Document[]
-  createdAt DateTime   @default(now())
+  id           String     @id @default(uuid())
+  email        String     @unique
+  name         String?
+  /// scrypt hash (never the password itself). Null for accounts created
+  /// before local login: the admin sets a password to activate them.
+  passwordHash String?
+  role         Role       @default(USER)
+  /// When the user read and accepted the privacy notice (shown after the first login).
+  privacyAcceptedAt DateTime?
+  documents    Document[]
+  createdAt    DateTime   @default(now())
 }
 
 enum DocumentStatus {
@@ -35,7 +47,15 @@ model Document {
   filename      String
   filePath      String
   extractedText String?
+  /// Reading the document (OCR / text layer): PENDING = queued,
+  /// PROCESSING = reading, COMPLETED = text ready (questions allowed), FAILED.
   status        DocumentStatus   @default(PENDING)
+  /// Why reading failed, shown to the user.
+  failureReason String?
+  /// The automatic explanation, tracked apart from reading: an LLM outage
+  /// does not make a document that was read successfully unusable.
+  explanationStatus DocumentStatus?
+  explanationError  String?
   interactions  LlmInteraction[]
   createdAt     DateTime         @default(now())
 }
@@ -47,5 +67,11 @@ model LlmInteraction {
   question   String
   answer     String
   role       String
+  /// Document passages sent to the model for this answer: [{ page, text }].
+  /// Lets users check exactly what each [p. N] citation refers to.
+  sources    Json?
+  /// STRICT: only what the document states. INTERPRETATION: the model's
+  /// analysis, requested explicitly by the user and always labelled as such.
+  mode       String   @default("STRICT")
   createdAt  DateTime @default(now())
 }

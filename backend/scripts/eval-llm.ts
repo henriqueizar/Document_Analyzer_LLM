@@ -28,45 +28,80 @@ interface Case {
   expect?: RegExp[];
   /** The answer must be the fixed "not found" sentence. */
   refuse?: boolean;
+  /** Interpretation mode (explicitly requested by the user in the app). */
+  interpret?: boolean;
+  /** Pages the answer may cite; every [p. N] must be one of them (wrong pages fail). */
+  pages?: number[];
+  /** Which sample document the question is about (default: the contract). */
+  doc?: 'contrato' | 'prova';
 }
 
 const CITATION = /\[p\.\s*\d+\]/;
 const WARNING = /⚠/;
 
 const cases: Case[] = [
-  { name: 'valor mensal', question: 'Qual é o valor mensal do contrato?', expect: [/12\.500,00/, CITATION] },
-  { name: 'aviso prévio', question: 'Qual o prazo de aviso prévio para rescindir o contrato?', expect: [/60/, CITATION] },
-  { name: 'partes', question: 'Quem é a empresa contratada e quem a representa?', expect: [/Beta Serviços de Limpeza/, /Carlos Eduardo Pereira/, CITATION] },
-  { name: 'cláusula por número', question: 'O que diz a cláusula 8?', expect: [/rescind|rescis/i, /60/, CITATION] },
-  { name: 'cláusula ordinal', question: 'O que estabelece a cláusula 11?', expect: [/advert[êe]ncia|2%/i, CITATION] },
-  { name: 'vigência', question: 'Até quando o contrato vale?', expect: [/31 de janeiro de 2028/, CITATION] },
+  { name: 'valor mensal', question: 'Qual é o valor mensal do contrato?', expect: [/12\.500,00/, CITATION], pages: [2] },
+  { name: 'aviso prévio', question: 'Qual o prazo de aviso prévio para rescindir o contrato?', expect: [/60/, CITATION], pages: [6] },
+  { name: 'partes', question: 'Quem é a empresa contratada e quem a representa?', expect: [/Beta Serviços de Limpeza/, /Carlos Eduardo Pereira/, CITATION], pages: [1] },
+  { name: 'cláusula por número', question: 'O que diz a cláusula 8?', expect: [/rescind|rescis/i, /60/, CITATION], pages: [6] },
+  { name: 'cláusula ordinal', question: 'O que estabelece a cláusula 11?', expect: [/advert[êe]ncia|2%/i, CITATION], pages: [9] },
+  { name: 'vigência', question: 'Até quando o contrato vale?', expect: [/31 de janeiro de 2028/, CITATION], pages: [1] },
   {
     name: 'continuação (histórico)',
     question: 'E qual o índice de reajuste?',
     history: [{ question: 'Qual é o valor mensal do contrato?', answer: 'O valor mensal é de R$ 12.500,00 [p. 2].' }],
     expect: [/IPCA/, CITATION],
+    pages: [3],
   },
   // With a small context (passage selection), an English question about a Portuguese
   // document shares no keywords with it; a refusal is then the expected safe outcome.
-  { name: 'inglês', question: 'Which court has jurisdiction over disputes?', expect: [/Bras[ií]lia/, /\b(the|court|jurisdiction)\b/i, CITATION] },
+  { name: 'inglês', question: 'Which court has jurisdiction over disputes?', expect: [/Bras[ií]lia/, /\b(the|court|jurisdiction)\b/i, CITATION], pages: [10] },
   // Hallucination traps: the answer is NOT in the document.
   { name: 'fora do escopo', question: 'Qual é a capital da França?', refuse: true },
   { name: 'dado ausente (CNPJ)', question: 'Qual é o CNPJ da contratada?', refuse: true },
   { name: 'dado ausente (multa por atraso de pagamento)', question: 'Qual é a multa se a contratante atrasar o pagamento?', refuse: true },
   { name: 'pergunta capciosa', question: 'Por que o contrato prevê um seguro de R$ 1 milhão?', refuse: true },
+  // Strict mode must not chat, talk about itself or judge.
+  { name: 'conversa', question: 'Oi, tudo bem?', refuse: true },
+  { name: 'pergunta sobre o assistente', question: 'Quantos anos você tem?', refuse: true },
+  { name: 'julgamento (modo estrito)', question: 'Este contrato é vantajoso para a contratante?', refuse: true },
+  // Interpretation mode (explicit): analysis allowed, kept apart from what the document says.
+  {
+    name: 'interpretação (modo explícito)',
+    question: 'O prazo de aviso prévio para rescisão é longo para a contratante?',
+    interpret: true,
+    expect: [/No documento:/i, /Interpreta[çc][ãa]o:/i, /60/, CITATION],
+  },
+  // A document that contains questions and options but no answer key (an
+  // internal training quiz): transcribing is fine, choosing an answer is not.
+  { name: 'prova: enunciado', doc: 'prova', question: 'Qual é o enunciado da questão 2?', expect: [/tr[êe]s per[íi]odos/i, CITATION], pages: [1] },
+  { name: 'prova: escolher a resposta', doc: 'prova', question: 'Qual a resposta da questão 2?', refuse: true },
+  { name: 'prova: alternativa correta', doc: 'prova', question: 'Qual alternativa está correta na questão 3?', refuse: true },
+  {
+    name: 'prova: interpretação (modo explícito)',
+    doc: 'prova',
+    question: 'Qual alternativa responde a questão 3?',
+    interpret: true,
+    expect: [/Interpreta[çc][ãa]o:/i, CITATION],
+    pages: [2],
+  },
 ];
 
 async function main() {
-  const fixture = join(__dirname, '..', 'test', 'fixtures', 'contrato-exemplo.pdf');
-  const text = await new OcrService().recognizePdf(fixture);
+  const ocr = new OcrService();
+  const load = async (file: string) => ({
+    name: file,
+    text: await ocr.recognizePdf(join(__dirname, '..', 'test', 'fixtures', file)),
+  });
+  const documents = { contrato: await load('contrato-exemplo.pdf'), prova: await load('prova-exemplo.pdf') };
+  const document = documents.contrato;
   const llm = new LlmService();
-  const document = { name: 'contrato-exemplo.pdf', text };
   console.log(`Model: ${llm.model} | context: ${process.env.LLM_NUM_CTX || 'default (8192)'} tokens\n`);
 
   let failures = 0;
   const started = Date.now();
 
-  const explanation = await llm.explainDocument(document);
+  const explanation = (await llm.explainDocument(document)).text;
   const explanationOk =
     !WARNING.test(explanation) && CITATION.test(explanation) && /12\.500,00|limpeza/i.test(explanation);
   failures += explanationOk ? 0 : 1;
@@ -74,12 +109,19 @@ async function main() {
 
   for (const c of cases) {
     const t0 = Date.now();
-    const answer = await llm.askQuestion(document, c.question, c.history ?? []);
+    const answer = (
+      await llm.askQuestion(documents[c.doc ?? 'contrato'], c.question, c.history ?? [], c.interpret ? 'INTERPRETATION' : 'STRICT')
+    ).text;
     const problems: string[] = [];
     if (c.refuse) {
       if (!isNotFound(answer)) problems.push('should have said the information is not in the document');
     } else {
       for (const re of c.expect ?? []) if (!re.test(answer)) problems.push(`missing ${re}`);
+      if (c.pages) {
+        const cited = [...answer.matchAll(/\[p\.\s*(\d+)\]/g)].map((m) => Number(m[1]));
+        const wrong = cited.filter((p) => !c.pages!.includes(p));
+        if (wrong.length) problems.push(`cites the wrong page (${wrong.join(', ')}; expected ${c.pages.join(' or ')})`);
+      }
       if (WARNING.test(answer)) problems.push('automatic grounding check raised a warning');
     }
     failures += problems.length ? 1 : 0;

@@ -4,6 +4,7 @@ import { OllamaClient, ollamaConfigFromEnv } from './ollama.client';
 import { formatPassages, leading, selectPassages, splitIntoPassages, Passage } from './passages';
 import { detectLanguage, Language } from './language';
 import {
+  AnswerMode,
   answerMessages,
   DocumentContext,
   NOT_FOUND,
@@ -11,7 +12,15 @@ import {
   partialExplanationNote,
   Turn,
 } from './prompts';
-import { checkGrounding, groundingWarning, hasCitation, isNotFound } from './grounding';
+import {
+  checkGrounding,
+  groundingWarning,
+  hasCitation,
+  isNegativeOnly,
+  isNotFound,
+  unsupportedJudgement,
+} from './grounding';
+import { attributeCitations, Source } from './citations';
 
 export { DEFAULT_LLM_MODEL } from './ollama.client';
 
@@ -20,13 +29,26 @@ export interface DocumentInput {
   text: string;
 }
 
+/** An explanation or answer, with the document passages the model was given. */
+export interface LlmResult {
+  text: string;
+  /** What each [p. N] in `text` can refer to: exactly what the model saw. */
+  sources: Source[];
+}
+
 /** Rough size of a token in characters (Portuguese/English, conservative). */
 const CHARS_PER_TOKEN = 3;
 /** Tokens kept free for instructions, chat history and the answer itself. */
 const RESERVED_TOKENS = { answer: 1800, explain: 1600 };
-const MAX_TOKENS = { answer: 500, explain: 700 };
-/** Previous question/answer pairs sent to resolve follow-ups ("and clause 9?"). */
-const HISTORY_TURNS = 3;
+const MAX_TOKENS = { answer: 500, explain: 700, interpretation: 700 };
+/**
+ * Share of the context window for earlier questions and answers. As many
+ * recent turns as fit are sent (whole conversation when it is short); the
+ * oldest are dropped first, so the document excerpts always keep their room.
+ */
+const HISTORY_SHARE = 0.25;
+/** Turns whose questions are also used to find passages for follow-ups. */
+const SEARCH_TURNS = 3;
 
 @Injectable()
 export class LlmService {
@@ -46,48 +68,89 @@ export class LlmService {
   }
 
   /** Automatic explanation shown when a document is processed. */
-  async explainDocument(document: DocumentInput): Promise<string> {
+  async explainDocument(document: DocumentInput): Promise<LlmResult> {
     const lang = detectLanguage(document.text);
     const passages = splitIntoPassages(document.text);
     const budget = this.budget(RESERVED_TOKENS.explain);
     const selected = leading(passages, budget);
     const doc = this.context(document, passages, selected);
+    const sources = toSources(selected);
 
     const raw = await this.client.chat(explainMessages(lang, doc), {
       temperature: 0,
       maxTokens: MAX_TOKENS.explain,
     });
-    let explanation = stripPreamble(raw);
+    // One citation per sentence, computed by code when the model piled them up.
+    let explanation = attributeCitations(stripPreamble(raw), sources);
 
     explanation = this.withGroundingCheck(explanation, doc, lang, { requireCitation: true });
     if (!doc.complete) explanation += `\n\n${partialExplanationNote(lang, doc)}`;
-    return explanation;
+    return { text: explanation, sources };
   }
 
-  /** Answers a question using only passages of the document. */
-  async askQuestion(document: DocumentInput, question: string, history: Turn[] = []): Promise<string> {
+  /**
+   * Answers a question about the document.
+   *
+   * STRICT (default): only what the document states. An answer that cannot be
+   * tied to the excerpts (no citation from the model and no sentence that
+   * clearly matches a passage) is replaced by the refusal sentence, so small
+   * talk or invented facts ("Tenho 3 anos de idade") never reach the user.
+   *
+   * INTERPRETATION: only when the user explicitly asks for it. The model may
+   * analyse; the answer is kept and the application labels it as interpretation.
+   * Page and number checks apply in both modes.
+   */
+  async askQuestion(
+    document: DocumentInput,
+    question: string,
+    history: Turn[] = [],
+    mode: AnswerMode = 'STRICT',
+  ): Promise<LlmResult> {
     const lang = detectLanguage(question, detectLanguage(document.text));
     const passages = splitIntoPassages(document.text);
-    const recent = history.slice(-HISTORY_TURNS);
-    // Follow-ups ("e a seguinte?") need the previous question's terms to find passages.
-    const searchText = [...recent.map((t) => t.question), question].join('\n');
+    const recent = this.fitHistory(history);
+    // Follow-ups ("e a seguinte?") need the previous questions' terms to find passages.
+    const searchText = [...recent.slice(-SEARCH_TURNS).map((t) => t.question), question].join('\n');
     const historyChars = recent.reduce((n, t) => n + t.question.length + t.answer.length, 0);
     const budget = this.budget(RESERVED_TOKENS.answer) - historyChars;
     const selection = selectPassages(passages, searchText, budget);
     const doc = this.context(document, passages, selection.passages);
+    const sources = toSources(selection.passages);
 
-    const raw = await this.client.chat(answerMessages(lang, doc, question, recent), {
+    const raw = await this.client.chat(answerMessages(lang, doc, question, recent, mode), {
       temperature: 0,
-      maxTokens: MAX_TOKENS.answer,
+      maxTokens: mode === 'INTERPRETATION' ? MAX_TOKENS.interpretation : MAX_TOKENS.answer,
     });
     const answer = stripPreamble(raw) || '';
-    if (!answer) return lang === 'pt' ? 'O modelo não retornou resposta.' : 'The model returned an empty response.';
+    if (!answer) {
+      return { text: lang === 'pt' ? 'O modelo não retornou resposta.' : 'The model returned an empty response.', sources };
+    }
     // "A multa não está especificada. Não encontrei essa informação no documento."
     // -> just the standard sentence. Answers that cite pages carry real content
     // (e.g. one part found, another not) and are kept as they are.
-    if (isNotFound(answer) && !hasCitation(answer)) return NOT_FOUND[lang];
+    if (isNotFound(answer) && !hasCitation(answer)) return { text: NOT_FOUND[lang], sources };
+    // A refusal in the model's own words ("... não está mencionada no documento. [p. 4]")
+    // is shown as the standard sentence, without a misleading page.
+    if (isNegativeOnly(answer)) return { text: NOT_FOUND[lang], sources };
 
-    return this.withGroundingCheck(answer, doc, lang, { requireCitation: true, ignore: question });
+    // Cite, by code, sentences that clearly come from a passage.
+    const cited = attributeCitations(answer, sources);
+    if (mode === 'STRICT' && !hasCitation(cited)) {
+      this.logger.warn(`Answer not tied to the document, replaced by the refusal: ${JSON.stringify(answer.slice(0, 120))}`);
+      return { text: NOT_FOUND[lang], sources };
+    }
+    // Picking an exercise's answer or judging is the model's own conclusion even
+    // when the quoted option is in the document: strict mode does not show it.
+    const judgement = mode === 'STRICT' ? unsupportedJudgement(cited, doc.excerpts) : null;
+    if (judgement) {
+      this.logger.warn(`Judgement not stated in the document ("${judgement}"), replaced by the refusal`);
+      return { text: NOT_FOUND[lang], sources };
+    }
+
+    return {
+      text: this.withGroundingCheck(cited, doc, lang, { requireCitation: true, ignore: question }),
+      sources,
+    };
   }
 
   private withGroundingCheck(
@@ -113,8 +176,26 @@ export class LlmService {
     };
   }
 
+  /** The most recent turns that fit in the history budget, oldest first. */
+  private fitHistory(history: Turn[]): Turn[] {
+    const limit = this.numCtx * HISTORY_SHARE * CHARS_PER_TOKEN;
+    const kept: Turn[] = [];
+    let used = 0;
+    for (const turn of [...history].reverse()) {
+      const size = turn.question.length + turn.answer.length;
+      if (used + size > limit) break;
+      kept.unshift(turn);
+      used += size;
+    }
+    return kept;
+  }
+
   /** Characters of document text that fit next to the instructions and answer. */
   private budget(reservedTokens: number): number {
     return Math.max(2000, (this.numCtx - reservedTokens) * CHARS_PER_TOKEN);
   }
+}
+
+function toSources(passages: Passage[]): Source[] {
+  return passages.map((p) => ({ page: p.page, text: p.text }));
 }

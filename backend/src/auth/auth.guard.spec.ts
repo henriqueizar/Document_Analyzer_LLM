@@ -1,6 +1,6 @@
 import { ExecutionContext, UnauthorizedException } from '@nestjs/common';
 import { SignJWT } from 'jose';
-import { AuthGuard } from './auth.guard';
+import { AdminGuard, AuthGuard } from './auth.guard';
 import { JWT_AUDIENCE, JWT_ISSUER } from './auth.constants';
 
 const SECRET = 'test-secret-that-is-at-least-32-characters-long';
@@ -27,13 +27,20 @@ function contextWith(authorization?: string) {
   return { context, request };
 }
 
+const ALICE = { id: 'u1', email: 'alice@example.com', name: 'Alice', role: 'USER', passwordHash: 'scrypt$...' };
+
 describe('AuthGuard', () => {
   const original = process.env.BACKEND_JWT_SECRET;
+  const prisma = { user: { findUnique: jest.fn() } };
   let guard: AuthGuard;
 
   beforeAll(() => {
     process.env.BACKEND_JWT_SECRET = SECRET;
-    guard = new AuthGuard();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    guard = new AuthGuard(prisma as any);
+  });
+  beforeEach(() => {
+    prisma.user.findUnique.mockReset().mockResolvedValue(ALICE);
   });
   afterAll(() => {
     process.env.BACKEND_JWT_SECRET = original;
@@ -42,7 +49,19 @@ describe('AuthGuard', () => {
   it('accepts a valid token and exposes the (lower-cased) e-mail', async () => {
     const { context, request } = contextWith(`Bearer ${await sign()}`);
     await expect(guard.canActivate(context)).resolves.toBe(true);
-    expect(request.user).toEqual({ email: 'alice@example.com' });
+    expect(prisma.user.findUnique).toHaveBeenCalledWith({ where: { email: 'alice@example.com' } });
+    expect(request.user).toEqual({ id: 'u1', email: 'alice@example.com', name: 'Alice', role: 'USER' });
+  });
+
+  it('rejects a valid token whose account no longer exists or has no password', async () => {
+    prisma.user.findUnique.mockResolvedValueOnce(null);
+    await expect(guard.canActivate(contextWith(`Bearer ${await sign()}`).context)).rejects.toBeInstanceOf(
+      UnauthorizedException,
+    );
+    prisma.user.findUnique.mockResolvedValueOnce({ ...ALICE, passwordHash: null });
+    await expect(guard.canActivate(contextWith(`Bearer ${await sign()}`).context)).rejects.toBeInstanceOf(
+      UnauthorizedException,
+    );
   });
 
   it.each([
@@ -76,7 +95,20 @@ describe('AuthGuard', () => {
 
   it('refuses to start without a strong secret', () => {
     process.env.BACKEND_JWT_SECRET = 'short';
-    expect(() => new AuthGuard()).toThrow(/BACKEND_JWT_SECRET/);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect(() => new AuthGuard(prisma as any)).toThrow(/BACKEND_JWT_SECRET/);
     process.env.BACKEND_JWT_SECRET = SECRET;
+  });
+});
+
+describe('AdminGuard', () => {
+  const ctx = (role?: string) =>
+    ({ switchToHttp: () => ({ getRequest: () => ({ user: role ? { role } : undefined }) }) }) as unknown as ExecutionContext;
+
+  it('lets administrators through and refuses everyone else', () => {
+    const guard = new AdminGuard();
+    expect(guard.canActivate(ctx('ADMIN'))).toBe(true);
+    expect(() => guard.canActivate(ctx('USER'))).toThrow(/Only administrators/);
+    expect(() => guard.canActivate(ctx())).toThrow(/Only administrators/);
   });
 });
