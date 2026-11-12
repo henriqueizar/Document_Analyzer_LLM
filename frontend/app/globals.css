@@ -480,6 +480,10 @@ button.danger:hover {
 .ask-bar .error {
   margin: 8px 0 0;
 }
+/* When following the conversation, stop above the fixed input bar, not behind it */
+.chat-end {
+  scroll-margin-bottom: 140px;
+}
 /* Text that is still being produced */
 .pending {
   color: var(--muted);

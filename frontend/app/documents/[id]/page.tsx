@@ -165,11 +165,16 @@ export default function DocumentPage() {
     };
   }, [id]);
 
-  // Like a messaging app: follow the conversation when a question is sent and answered.
+  // Like a messaging app: follow the conversation when a question is sent and
+  // again when its answer arrives (it can be longer than the "Thinking" line).
   const answered = data?.interactions.filter((i) => i.role === 'QUESTION').length ?? 0;
+  const following = useRef(false);
   useEffect(() => {
-    if (pending !== null || asking) chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [pending, asking, answered]);
+    if (pending !== null) following.current = true;
+    if (!following.current) return;
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    if (pending === null) following.current = false; // answer shown: stop following
+  }, [pending, answered]);
 
   // Reading and explaining happen in the background: refresh until both are done.
   const busy = data ? inProgress(data.document) : false;
@@ -361,7 +366,8 @@ export default function DocumentPage() {
           </p>
         </div>
       )}
-      <div ref={chatEndRef} />
+      {/* scroll target: its scroll margin keeps the last message above the fixed input bar */}
+      <div ref={chatEndRef} className="chat-end" />
 
       {/* Input, fixed at the bottom of the screen like a messaging app. Enter sends. */}
       <div className="ask-bar">
