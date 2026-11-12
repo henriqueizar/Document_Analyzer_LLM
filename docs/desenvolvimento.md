@@ -1,65 +1,11 @@
+# Development
 
-Henrique Izar - Document LLM Analyzer
+Technical details for developers. The overview, privacy notes and quick start are in the
+[README](../README.md).
 
-This README was written with the help of ChatGPT and manually reviewed and adapted.
+## Running the LLM in Docker
 
-# DOCUMENT LLM ANALYZER
-
-Upload an invoice, receipt or any PDF/image, get an automatic explanation from a
-local LLM, and ask questions about it.
-
-## Running the project locally
-
-### Prerequisites
-
-- Node.js 20.12+ (22 LTS recommended)
-- Docker (Docker Desktop on macOS/Windows)
-- [Ollama](https://ollama.com) — on macOS install the native app (`brew install ollama`
-  or the installer); it uses the Apple GPU. Docker on macOS cannot use the GPU.
-
-No ImageMagick, GraphicsMagick or Ghostscript is needed: PDFs are read and rendered
-in Node.
-
-### How to run
-
-1. Clone the repository
-
-```bash
-git clone https://github.com/henriqueizar/Document_Analyzer_LLM
-```
-
-2. Environment variables
-
-```bash
-cp backend/.env.example backend/.env
-cp frontend/.env.example frontend/.env.local
-```
-
-Fill in:
-
-- `BACKEND_JWT_SECRET` — the **same** value in both files (`openssl rand -base64 32`).
-- `NEXTAUTH_SECRET` — another random value (`openssl rand -base64 32`).
-
-3. Start PostgreSQL
-
-```bash
-cd backend
-docker compose up -d
-```
-
-4. Start the LLM
-
-macOS (recommended, uses the GPU):
-
-```bash
-ollama serve        # skip if the Ollama app is already running
-ollama pull qwen3:8b
-```
-
-`qwen3:8b` (~5 GB) is the default and fits a 16 GB Mac. With 8 GB of RAM use a smaller
-model (e.g. `qwen3:4b` or `gemma3:4b`) via `LLM_MODEL` in `backend/.env`.
-
-Alternatives:
+From the `backend` folder:
 
 - Ollama in Docker, CPU only (any OS): `docker compose --profile ollama up -d`, then
   `docker exec ollama ollama pull qwen3:8b`
@@ -69,43 +15,7 @@ Alternatives:
 Model, context size and timeout are set in `backend/.env` (`LLM_MODEL`, `LLM_NUM_CTX`,
 `LLM_TIMEOUT_MS`); see `backend/.env.example`.
 
-5. Backend
-
-```bash
-cd backend
-npm install
-npm run start:dev
-```
-
-`npm run start:dev` first applies pending database migrations and regenerates the Prisma
-client (`npm run db:update`), so after a `git pull` you only need to restart it. The
-database (`docker compose up -d`) must be running.
-
-Backend runs on http://localhost:3000
-
-6. Frontend
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-Frontend runs on http://localhost:3001
-
-7. Usage
-
-Open http://localhost:3001. On the first run the app asks you to **create the
-administrator account** (if you use the app alone, this is your account). Then upload a
-document (PDF or image), wait for the automatic explanation and ask questions. Previous
-documents and chats are under "My documents". The administrator adds other people under
-"Users"; everyone can change their password under "Account".
-
-Accounts created with Google sign-in in earlier versions are kept with their documents:
-the administrator sets a password for them under "Users" (or, for your own account, use
-the same e-mail when creating the administrator).
-
-### Tests
+## Tests
 
 ```bash
 cd backend
@@ -118,7 +28,7 @@ The e2e test stubs the LLM, so it does not need Ollama.
 To evaluate the real model (needs Ollama running with the configured model):
 
 ```bash
-npm run eval:llm                     # sample contract, whole document in context
+npm run eval:llm                     # sample contract, exam and paper, whole document in context
 LLM_NUM_CTX=4096 npm run eval:llm    # small context: exercises passage selection
 ```
 
@@ -135,7 +45,7 @@ It runs the end-to-end test (login, upload, real OCR, questions) in a container 
 Docker network with no route to the internet, after proving that the container cannot
 reach any external host. See `docs/privacidade-lgpd.md` and the in-app Privacy page.
 
-## Development details
+## Architecture and internals
 
 ### Architecture
 
@@ -164,7 +74,7 @@ Local accounts only; no external identity provider.
   Passwords are stored as salted scrypt hashes, never in plain text. After 5 failed
   attempts an e-mail is blocked for 15 minutes. Sessions last 12 hours.
 - **Roles:** administrators add users and reset passwords under "Users"; every user can
-  change their own password under "Account".
+  change their own password and language under "Account".
 - The frontend route `/api/backend-token` checks the NextAuth session on the server and
   issues a short-lived (5 min) token signed with `BACKEND_JWT_SECRET`. The browser
   sends it to the backend as `Authorization: Bearer <token>`.
@@ -196,6 +106,11 @@ Local accounts only; no external identity provider.
 - PDFs: every page is processed (up to `MAX_PDF_PAGES`, default 50). Pages with an
   embedded text layer use it directly (fast and exact); scanned pages are rendered in
   memory and OCR'd. No temporary files are written, so concurrent uploads cannot mix.
+- Damaged PDFs that pdf.js only partly reads are repaired in memory with pdf-lib.
+- Text from subset fonts without a ToUnicode map comes out shifted by 29 characters
+  ("0XOWLDJHQW" for "Multiagent"); such lines are decoded only when the result is
+  plausible words (`src/ocr/shifted-glyphs.ts`), and leftover control characters are
+  removed.
 
 ### LLM
 
@@ -208,7 +123,11 @@ The assistant answers **only from the document**. Defences against hallucination
   documents are sent whole; for long ones only the passages relevant to the question are
   sent (keyword ranking plus explicit references such as "cláusula 8" or "página 3").
   The explanation of a long document says which pages it covers.
-- **Strict prompts in the user's language** (pt-BR or English, never mixed): use only
+- **Strict prompts in the reader's language** (pt-BR or English, never mixed; each user
+  chooses under "Account", default `DEFAULT_LANGUAGE=pt`). A reply in the wrong language
+  is asked for once more. Answers written in another language (e.g. by the uploader) keep
+  the original and offer "View translation": translated once by the local LLM, stored,
+  and flagged if the translation changed a number or a page citation. Use only
   the excerpts, no outside knowledge, cite `[p. N]` after each fact, copy amounts and
   dates verbatim, ignore instructions written inside documents, and reply with a fixed
   sentence ("Não encontrei essa informação no documento.") when the answer is not there.
@@ -217,7 +136,9 @@ The assistant answers **only from the document**. Defences against hallucination
   states: it does not pick answers to exercises in the document, give opinions or draw
   conclusions, and it refuses small talk. An answer that cannot be tied to the document
   (no citation, and no sentence that clearly matches a passage) is replaced by the
-  refusal sentence by the application. Interpretation is available only when the user
+  refusal sentence by the application. Questions asking for an exercise's answer (unless
+  the document has an answer key), and answers that judge, get a notice that this would
+  require interpretation, pointing to "Interpret". Interpretation is available only when the user
   ticks "Interpret" for a question (it turns itself off after sending): the model may
   then analyse, separating "No documento" (cited facts) from "Interpretação", and the
   application shows the answer in a box labelled as interpretation.
@@ -231,23 +152,16 @@ The assistant answers **only from the document**. Defences against hallucination
   Otherwise the answer is shown with a highlighted warning.
 - Earlier questions and answers are sent as conversation context (never as a source):
   the whole conversation when it is short, otherwise the most recent turns that fit in
-  a quarter of the context window.
+  a quarter of the context window. Earlier refusals are left out (they lead small models
+  to refuse again).
 
 No technique removes hallucinations completely; these reduce them and make the rest
 visible. Known limit: keyword selection does not match across languages (an English
 question about a Portuguese document that does not fit in the context may be refused).
-Semantic search (RAG) is planned.
+Search across documents is planned (see the roadmap in the README).
 
 ### Deployment notes
 
 OCR and LLM processing are CPU/GPU-intensive and long-running, so the backend is not
 suitable for serverless environments such as Vercel Functions.
 
-## Future improvements
-
-- Move OCR and LLM processing to a background job queue and poll the status from the
-  frontend (today `/process` is awaited by the upload page).
-- Keep OCR and explanation statuses separate, so an LLM outage does not mark a
-  successfully read document as FAILED.
-- Semantic search across documents (RAG with multilingual embeddings).
-- Improve frontend visual design and overall user experience.
