@@ -13,6 +13,7 @@ import {
   Turn,
 } from './prompts';
 import {
+  asksToChooseAnswer,
   checkGrounding,
   groundingWarning,
   hasCitation,
@@ -125,6 +126,12 @@ export class LlmService {
     // Earlier refusals carry no information and lead small models to refuse
     // again ("Não encontrei..." three times in a row); they are not sent.
     const conversation = recent.filter((t) => !(isNotFound(t.answer) && !hasCitation(t.answer)));
+    // Choosing an exercise's answer is the model's own conclusion: refused in
+    // strict mode before asking, unless the document has its own answer key.
+    if (mode === 'STRICT' && asksToChooseAnswer(question, document.text)) {
+      this.logger.warn('Question asks to choose an exercise answer; refused in strict mode');
+      return { text: NOT_FOUND[lang], sources, language: lang };
+    }
     const raw = await this.chatIn(lang, answerMessages(lang, doc, question, conversation, mode), {
       temperature: 0,
       maxTokens: mode === 'INTERPRETATION' ? MAX_TOKENS.interpretation : MAX_TOKENS.answer,

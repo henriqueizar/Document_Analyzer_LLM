@@ -1,4 +1,4 @@
-import { checkGrounding, isNegativeOnly, isNotFound, unsupportedJudgement } from './grounding';
+import { asksToChooseAnswer, checkGrounding, isNegativeOnly, isNotFound, unsupportedJudgement } from './grounding';
 
 const source = { text: '[p. 2]\nO valor mensal é de R$ 12.500,00, reajuste de 4,5% em 01/03/2027.', pages: [2] };
 const check = (answer: string, requireCitation = true) =>
@@ -41,6 +41,8 @@ describe('isNegativeOnly', () => {
     'Não há menção a seguro no contrato.',
     'The late payment fine is not specified in the document. [p. 4]',
     'The document does not mention an insurance.',
+    // seen with qwen3:8b: its own wording plus the standard sentence and a page
+    'A multa por atraso no pagamento não é mencionada no documento. Não encontrei essa informação no documento. [p. 7]',
   ])('recognises a refusal in other words: %s', (answer) => {
     expect(isNegativeOnly(answer)).toBe(true);
   });
@@ -79,5 +81,37 @@ describe('unsupportedJudgement', () => {
     'O valor mensal é de R$ 12.500,00 [p. 2].',
   ])('leaves factual answers alone: %s', (answer) => {
     expect(unsupportedJudgement(answer, exam)).toBeNull();
+  });
+});
+
+describe('asksToChooseAnswer', () => {
+  const exam = 'Questão 2. A política permite dividir as férias em: A) dois períodos B) três períodos';
+
+  it.each([
+    'Qual a resposta da questão 2?',
+    'Qual alternativa está correta na questão 3?',
+    'Qual alternativa responde a questão 3?',
+    'Qual é a resposta certa do exercício 4?',
+    'Resolva a questão 5',
+    'Qual o gabarito?',
+    'What is the correct answer to question 2?',
+    'Which option is correct in question 3?',
+  ])('recognises a request to pick an answer: %s', (question) => {
+    expect(asksToChooseAnswer(question, exam)).toBe(true);
+  });
+
+  it.each([
+    'Qual é o enunciado da questão 2?',
+    'Quais são as alternativas da questão 3?',
+    'Qual opção de pagamento o contrato prevê?',
+    'Qual foi a resposta da empresa à notificação?',
+    'Qual o prazo de aviso prévio?',
+    'What does question 2 ask?',
+  ])('lets other questions through: %s', (question) => {
+    expect(asksToChooseAnswer(question, exam)).toBe(false);
+  });
+
+  it('allows it when the document has its own answer key', () => {
+    expect(asksToChooseAnswer('Qual a resposta da questão 2?', `${exam}\nGABARITO: 1-A, 2-B`)).toBe(false);
   });
 });

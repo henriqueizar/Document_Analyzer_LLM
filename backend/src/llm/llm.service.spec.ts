@@ -119,7 +119,7 @@ describe('LlmService', () => {
 
     it('strict mode: tells the model not to pick exercise answers, judge or chat', async () => {
       fetchMock.mockResolvedValue(ok('x [p. 1].'));
-      await new LlmService().askQuestion(contract, 'Qual a resposta correta da questão 24?');
+      await new LlmService().askQuestion(contract, 'Qual o prazo de aviso prévio?');
       expect(system()).toMatch(/Não escolha a resposta de questões ou exercícios/);
       expect(system()).toMatch(/cumprimentos, conversa e perguntas sobre você/);
     });
@@ -155,6 +155,13 @@ describe('LlmService', () => {
       ]);
       const roles = sent().messages.map((m: { role: string }) => m.role);
       expect(roles).toEqual(['system', 'user', 'assistant', 'user']);
+    });
+
+    it('refuses to pick an exercise answer in strict mode without asking the model', async () => {
+      const exam = { name: 'prova.pdf', text: '--- Page 1 ---\nQuestão 2. Dividir as férias em: A) dois períodos B) três períodos' };
+      const { text } = await new LlmService().askQuestion(exam, 'Qual a resposta da questão 2?');
+      expect(text).toBe('Não encontrei essa informação no documento.');
+      expect(fetchMock).not.toHaveBeenCalled();
     });
 
     it('does not send earlier refusals, which only lead the model to refuse again', async () => {
