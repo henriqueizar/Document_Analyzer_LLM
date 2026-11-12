@@ -11,7 +11,7 @@
 import { join } from 'path';
 import { OcrService } from '../src/ocr/ocr.service';
 import { LlmService } from '../src/llm/llm.service';
-import { isNotFound } from '../src/llm/grounding';
+import { isInterpretationNotice, isNotFound } from '../src/llm/grounding';
 import type { Turn } from '../src/llm/prompts';
 
 try {
@@ -134,7 +134,10 @@ async function main() {
     ).text;
     const problems: string[] = [];
     if (c.refuse) {
-      if (!isNotFound(answer)) problems.push('should have said the information is not in the document');
+      // the refusal, or the notice that the question needs interpretation
+      if (!isNotFound(answer) && !isInterpretationNotice(answer)) {
+        problems.push('should have said the document does not state it');
+      }
     } else {
       for (const re of c.expect ?? []) if (!re.test(answer)) problems.push(`missing ${re}`);
       if (c.pages) {

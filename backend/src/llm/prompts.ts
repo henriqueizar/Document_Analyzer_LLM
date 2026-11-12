@@ -6,6 +6,22 @@ export const NOT_FOUND: Record<Language, string> = {
   en: 'I could not find this information in the document.',
 };
 
+/**
+ * Strict-mode answers to questions that the document does not settle but the
+ * reader could get from the model's own reading: "not found" would be false
+ * (the question is in the document), so the user is pointed to Interpret.
+ */
+export const NEEDS_INTERPRETATION: Record<'exercise' | 'judgement', Record<Language, string>> = {
+  exercise: {
+    pt: 'O documento não diz qual é a resposta correta; isso exigiria interpretação. Marque "Interpretar" abaixo para ver a análise do modelo.',
+    en: 'The document does not say which answer is correct; that would require interpretation. Tick "Interpret" below to see the model\'s analysis.',
+  },
+  judgement: {
+    pt: 'O documento não traz essa avaliação; ela exigiria interpretação. Marque "Interpretar" abaixo para ver a análise do modelo.',
+    en: 'The document does not make this assessment; it would require interpretation. Tick "Interpret" below to see the model\'s analysis.',
+  },
+};
+
 export interface DocumentContext {
   name: string;
   /** Selected passages rendered with formatPassages(). */

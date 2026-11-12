@@ -102,13 +102,18 @@ describe('LlmService', () => {
       expect(text).toBe('Não encontrei essa informação no documento.');
     });
 
+    const EXERCISE_NOTICE = 'O documento não diz qual é a resposta correta; isso exigiria interpretação. Marque "Interpretar" abaixo para ver a análise do modelo.';
+    const JUDGEMENT_NOTICE = 'O documento não traz essa avaliação; ela exigiria interpretação. Marque "Interpretar" abaixo para ver a análise do modelo.';
+
     it.each([
-      ['picking an option of an exercise', 'Qual a resposta da questão 3?', 'A resposta da questão 3 é: "B. aviso prévio de 60 dias" [p. 3].'],
+      // the question does not look like an exercise, the answer picks one: caught on the answer side
+      ['picking an option of an exercise', 'E sobre a questão 3?', 'A resposta da questão 3 é: "B. aviso prévio de 60 dias" [p. 3].'],
       ['judging the contract', 'Esse prazo é bom?', 'O prazo de 60 dias é razoável [p. 3].'],
     ])('strict mode: replaces a judgement the document does not make (%s), even when cited', async (_, q, judged) => {
       fetchMock.mockResolvedValue(ok(judged));
       const { text } = await new LlmService().askQuestion(contract, q);
-      expect(text).toBe('Não encontrei essa informação no documento.');
+      // not "not found": the question is in the document; the reader is pointed to Interpret
+      expect(text).toBe(JUDGEMENT_NOTICE);
     });
 
     it('interpretation mode keeps judgements (they are labelled by the app)', async () => {
@@ -157,11 +162,19 @@ describe('LlmService', () => {
       expect(roles).toEqual(['system', 'user', 'assistant', 'user']);
     });
 
-    it('refuses to pick an exercise answer in strict mode without asking the model', async () => {
+    it('points exercise-answer questions to Interpret in strict mode without asking the model', async () => {
       const exam = { name: 'prova.pdf', text: '--- Page 1 ---\nQuestão 2. Dividir as férias em: A) dois períodos B) três períodos' };
       const { text } = await new LlmService().askQuestion(exam, 'Qual a resposta da questão 2?');
-      expect(text).toBe('Não encontrei essa informação no documento.');
+      expect(text).toBe(EXERCISE_NOTICE);
       expect(fetchMock).not.toHaveBeenCalled();
+      const { text: english } = await new LlmService().askQuestion(exam, 'What is the correct answer to question 2?', [], 'STRICT', 'en');
+      expect(english).toBe('The document does not say which answer is correct; that would require interpretation. Tick "Interpret" below to see the model\'s analysis.');
+    });
+
+    it('does not send earlier interpretation notices as history either', async () => {
+      fetchMock.mockResolvedValue(ok('Aviso prévio de 60 dias [p. 3].'));
+      await new LlmService().askQuestion(contract, 'Qual o prazo de aviso prévio?', [{ question: 'Esse prazo é bom?', answer: JUDGEMENT_NOTICE }]);
+      expect(sent().messages).toHaveLength(1 + 1);
     });
 
     it('does not send earlier refusals, which only lead the model to refuse again', async () => {

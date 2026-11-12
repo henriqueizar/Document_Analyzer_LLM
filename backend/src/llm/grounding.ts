@@ -1,5 +1,5 @@
 import type { Language } from './language';
-import { NOT_FOUND } from './prompts';
+import { NEEDS_INTERPRETATION, NOT_FOUND } from './prompts';
 import { normalize } from './passages';
 
 export interface GroundingResult {
@@ -104,6 +104,12 @@ export function unsupportedJudgement(answer: string, sourceText: string): string
     if (m && !source.includes(m[0].trim())) return m[0].trim();
   }
   return null;
+}
+
+/** One of the strict-mode notices that point the reader to Interpret. */
+export function isInterpretationNotice(answer: string): boolean {
+  const a = answer.trim();
+  return Object.values(NEEDS_INTERPRETATION).some((byLang) => Object.values(byLang).includes(a));
 }
 
 export function isNotFound(answer: string): boolean {
