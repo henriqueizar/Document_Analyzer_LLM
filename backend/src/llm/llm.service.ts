@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { stripPreamble } from './clean-response';
-import { OllamaClient, ollamaConfigFromEnv } from './ollama.client';
+import { ChatMessage, ChatOptions, OllamaClient, ollamaConfigFromEnv } from './ollama.client';
 import { formatPassages, leading, selectPassages, splitIntoPassages, Passage } from './passages';
 import { detectLanguage, Language } from './language';
 import {
@@ -76,7 +76,7 @@ export class LlmService {
     const doc = this.context(document, passages, selected);
     const sources = toSources(selected);
 
-    const raw = await this.client.chat(explainMessages(lang, doc), {
+    const raw = await this.chatIn(lang, explainMessages(lang, doc), {
       temperature: 0,
       maxTokens: MAX_TOKENS.explain,
     });
@@ -117,7 +117,7 @@ export class LlmService {
     const doc = this.context(document, passages, selection.passages);
     const sources = toSources(selection.passages);
 
-    const raw = await this.client.chat(answerMessages(lang, doc, question, recent, mode), {
+    const raw = await this.chatIn(lang, answerMessages(lang, doc, question, recent, mode), {
       temperature: 0,
       maxTokens: mode === 'INTERPRETATION' ? MAX_TOKENS.interpretation : MAX_TOKENS.answer,
     });
@@ -151,6 +151,36 @@ export class LlmService {
       text: this.withGroundingCheck(cited, doc, lang, { requireCitation: true, ignore: question }),
       sources,
     };
+  }
+
+  /**
+   * Small models sometimes answer in English even when told to write in
+   * Portuguese (more so when the excerpts contain English). When the reply
+   * comes back in the wrong language, ask once more with an explicit
+   * reminder at the end of the request.
+   */
+  private async chatIn(lang: Language, messages: ChatMessage[], options: ChatOptions): Promise<string> {
+    const first = await this.client.chat(messages, options);
+    if (!this.wrongLanguage(first, lang)) return first;
+
+    this.logger.warn(`Reply not in ${lang}; asking again with an explicit language reminder`);
+    const reminder =
+      lang === 'pt'
+        ? '\n\nIMPORTANTE: escreva toda a resposta em português do Brasil, mesmo que o documento esteja em outro idioma. Citações literais do documento podem ficar no idioma original.'
+        : '\n\nIMPORTANT: write the whole answer in English, even if the document is in another language. Literal quotes from the document may stay in their original language.';
+    const last = messages[messages.length - 1];
+    const second = await this.client.chat(
+      [...messages.slice(0, -1), { ...last, content: last.content + reminder }],
+      options,
+    );
+    return second;
+  }
+
+  /** Long enough to judge, not a refusal, and clearly in the other language. */
+  private wrongLanguage(text: string, lang: Language): boolean {
+    const plain = text.replace(/\[\s*p\.?\s*\d+\s*\]/gi, '').trim();
+    if (isNotFound(plain) || plain.split(/\s+/).length < 8) return false;
+    return detectLanguage(plain, lang) !== lang;
   }
 
   private withGroundingCheck(

@@ -209,6 +209,34 @@ describe('LlmService', () => {
     });
   });
 
+  describe('language of the reply', () => {
+    it('asks again once, with a reminder, when the explanation comes back in English', async () => {
+      fetchMock
+        .mockResolvedValueOnce(ok('This is a cleaning services contract between ACME and Beta, and the monthly amount is R$ 12.500,00 [p. 2].'))
+        .mockResolvedValueOnce(ok('É um contrato de serviços de limpeza entre ACME e Beta, e o valor mensal é de R$ 12.500,00 [p. 2].'));
+      const { text } = await new LlmService().explainDocument(contract);
+      expect(text).toMatch(/^É um contrato de serviços de limpeza/);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(JSON.parse(fetchMock.mock.calls[1][1].body).messages.at(-1).content).toMatch(
+        /IMPORTANTE: escreva toda a resposta em português do Brasil/,
+      );
+    });
+
+    it('does not ask again when the reply is already in the right language', async () => {
+      fetchMock.mockResolvedValue(ok('É um contrato de serviços de limpeza entre ACME e Beta, com valor mensal de R$ 12.500,00 [p. 2].'));
+      await new LlmService().explainDocument(contract);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('answers an English question in English, asking again if needed', async () => {
+      fetchMock
+        .mockResolvedValueOnce(ok('O aviso prévio para rescisão do contrato é de 60 dias, conforme a cláusula oitava [p. 3].'))
+        .mockResolvedValueOnce(ok('The termination notice is 60 days, according to the eighth clause of the contract [p. 3].'));
+      const { text } = await new LlmService().askQuestion(contract, 'What is the termination notice period?');
+      expect(text).toMatch(/^The termination notice is 60 days/);
+    });
+  });
+
   describe('explainDocument', () => {
     it('explains in the document language and removes filler', async () => {
       fetchMock.mockResolvedValue(
