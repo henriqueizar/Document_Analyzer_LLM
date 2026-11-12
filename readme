@@ -205,6 +205,11 @@ The assistant answers **only from the document**. Defences against hallucination
   dates verbatim, ignore instructions written inside documents, and reply with a fixed
   sentence ("Não encontrei essa informação no documento.") when the answer is not there.
 - **Temperature 0**, thinking mode off for reasoning models.
+- **Clickable citations:** every `[p. N]` opens, under the answer, the exact text from
+  page N that the model was given (stored with each answer), with the matching sentence
+  highlighted; for PDFs, "Show page N in the PDF" opens the viewer at that page. When a
+  model piles its citations at the end, the application (not the model) gives each
+  sentence the page of the passage it clearly matches, or none.
 - **Automatic check after every answer:** cited pages must be among those provided,
   every multi-digit number must appear in the document, and answers must cite a page.
   Otherwise the answer is shown with a highlighted warning.

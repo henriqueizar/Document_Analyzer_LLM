@@ -393,3 +393,55 @@ textarea {
   width: 100%;
   font-size: 0.85em;
 }
+
+/* Clickable citations: [p. N] */
+button.cite {
+  display: inline;
+  padding: 0 2px;
+  border: 0;
+  border-bottom: 1px dashed var(--ink);
+  background: none;
+}
+button.cite:hover,
+button.cite[aria-pressed='true'] {
+  background: var(--ink);
+  color: var(--paper);
+}
+/* Source panel shown under an answer when a citation is clicked */
+.source {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 12px 16px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-left-width: 4px;
+}
+.source-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  text-transform: uppercase;
+}
+.source-text {
+  margin: 0;
+  white-space: pre-wrap;
+  font-size: 0.9em;
+}
+.source mark {
+  background: var(--ink);
+  color: var(--paper);
+}
+button.link-button {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-decoration: underline;
+}
+button.link-button:hover {
+  background: none;
+  color: var(--ink);
+}

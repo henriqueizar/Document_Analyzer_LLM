@@ -1,14 +1,17 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { apiFetch, errorMessage } from '@/lib/api';
+import { CitedText, type Source } from './citations';
 
 interface Interaction {
   id: string;
   role: 'EXPLANATION' | 'QUESTION';
   question: string;
   answer: string;
+  /** Passages sent to the model (null for answers created before sources were stored). */
+  sources: Source[] | null;
 }
 
 type Status = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
@@ -31,18 +34,26 @@ function previewKind(name: string): PreviewKind | null {
 }
 
 /**
- * The backend appends an automatic grounding warning ("⚠ ...") when it could
- * not verify part of an answer against the document; show it apart.
+ * LLM text with clickable [p. N] citations. The backend appends an automatic
+ * grounding warning ("⚠ ...") when it could not verify part of the text
+ * against the document; it is shown apart.
  */
-function LlmText({ label, text }: { label: string; text: string }) {
+function LlmText({
+  label,
+  interaction,
+  onShowPage,
+}: {
+  label: string;
+  interaction: Interaction;
+  onShowPage?: (page: number) => void;
+}) {
+  const text = interaction.answer;
   const at = text.search(/\n*⚠/u);
   const body = at === -1 ? text : text.slice(0, at).trimEnd();
   const warning = at === -1 ? null : text.slice(at).trim();
   return (
     <>
-      <p className="llm-text">
-        <strong>{label}</strong> {body}
-      </p>
+      <CitedText label={label} text={body} sources={interaction.sources} onShowPage={onShowPage} />
       {warning && (
         <p className="warning" role="note">
           {warning}
@@ -62,6 +73,9 @@ export default function DocumentPage() {
   const { id } = useParams<{ id: string }>();
   const [data, setData] = useState<DocumentData | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  /** Page shown in the PDF viewer (set by "Show page N in the PDF"). */
+  const [pdfPage, setPdfPage] = useState<number | null>(null);
+  const previewRef = useRef<HTMLDivElement>(null);
   const [question, setQuestion] = useState('');
   const [asking, setAsking] = useState(false);
   const [processing, setProcessing] = useState(false);
@@ -151,6 +165,13 @@ export default function DocumentPage() {
   if (!data) return <p>Loading...</p>;
 
   const { document, interactions } = data;
+  const showPage =
+    kind === 'pdf' && previewUrl
+      ? (page: number) => {
+          setPdfPage(page);
+          previewRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      : undefined;
   const ready = document.status === 'COMPLETED';
   const questions = interactions.filter((i) => i.role === 'QUESTION');
 
@@ -185,8 +206,13 @@ export default function DocumentPage() {
         </div>
       )}
       {previewUrl && kind === 'pdf' && (
-        <div className="preview">
-          <iframe src={previewUrl} title={`Preview of ${document.originalName}`} />
+        <div className="preview" ref={previewRef}>
+          <iframe
+            // a new key reloads the viewer so it opens at the requested page
+            key={pdfPage ?? 0}
+            src={pdfPage ? `${previewUrl}#page=${pdfPage}` : previewUrl}
+            title={`Preview of ${document.originalName}`}
+          />
           <small>
             <a href={previewUrl} target="_blank" rel="noopener noreferrer">
               Open the PDF in a new tab
@@ -199,7 +225,7 @@ export default function DocumentPage() {
       {interactions
         .filter((i) => i.role === 'EXPLANATION')
         .map((i) => (
-          <LlmText key={i.id} label="Explanation:" text={i.answer} />
+          <LlmText key={i.id} label="Explanation:" interaction={i} onShowPage={showPage} />
         ))}
 
       <hr />
@@ -212,7 +238,7 @@ export default function DocumentPage() {
       {questions.map((i) => (
         <div key={i.id}>
           <p><strong>You:</strong> {i.question}</p>
-          <LlmText label="LLM:" text={i.answer} />
+          <LlmText label="LLM:" interaction={i} onShowPage={showPage} />
         </div>
       ))}
 
