@@ -8,6 +8,7 @@ import {
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import * as path from 'path';
+import * as fs from 'fs/promises';
 import { LlmService } from '../llm/llm.service';
 import { ProcessingService } from './processing.service';
 import { stripPreamble } from '../llm/clean-response';
@@ -90,6 +91,30 @@ export class DocumentsService {
     });
     this.processing.enqueue(documentId);
     return this.toPublic(queued);
+  }
+
+  /**
+   * Deletes the document permanently: the uploaded file, the extracted text and
+   * every explanation, question and answer (LGPD right to erasure, art. 18).
+   * Refused while the document is being processed, so nothing is left half-done.
+   */
+  async remove(documentId: string, userEmail: string): Promise<void> {
+    const document = await this.findOwned(documentId, userEmail);
+    if (this.busy(document)) {
+      throw new ConflictException('This document is being processed. Wait for it to finish, then delete it.');
+    }
+    await this.prisma.$transaction([
+      this.prisma.llmInteraction.deleteMany({ where: { documentId } }),
+      this.prisma.document.delete({ where: { id: documentId } }),
+    ]);
+    try {
+      await fs.unlink(path.resolve(document.filePath));
+    } catch (error) {
+      // already gone is fine; anything else is logged (the records are deleted)
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        this.logger.error(`Could not delete the file of document ${documentId}`, error);
+      }
+    }
   }
 
   private busy(document: { id: string; status: string; explanationStatus: string | null }) {

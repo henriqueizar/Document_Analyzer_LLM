@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   Param,
@@ -96,6 +97,13 @@ export class DocumentsController {
       type: mimeType,
       disposition: 'inline',
     });
+  }
+
+  /** Permanently deletes the document, its file and all its interactions. */
+  @Delete(':id')
+  @HttpCode(204)
+  async remove(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    await this.documentsService.remove(id, user.email);
   }
 
   @Get(':id')

@@ -10,7 +10,8 @@ import { Test } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { SignJWT } from 'jose';
-import { join } from 'path';
+import { join, resolve } from 'path';
+import { existsSync } from 'fs';
 import { AppModule } from '../src/app.module';
 import { LlmService } from '../src/llm/llm.service';
 import { JWT_AUDIENCE, JWT_ISSUER } from '../src/auth/auth.constants';
@@ -200,6 +201,28 @@ describe('Documents API (e2e)', () => {
     it('rejects tokens of accounts that do not exist', async () => {
       const ghost = `Bearer ${await tokenFor(`ghost-${runId}@example.com`)}`;
       await http().get('/documents').set('Authorization', ghost).expect(401);
+    });
+  });
+
+  describe('deletion', () => {
+    it('deletes the document, its file and its interactions; others cannot', async () => {
+      const { body } = await http()
+        .post('/documents/upload')
+        .set('Authorization', alice)
+        .attach('file', fixture('receipt.png'))
+        .expect(201);
+      await processed();
+      await http().post(`/documents/${body.id}/ask`).set('Authorization', alice).send({ question: 'total?' }).expect(201);
+      const prisma = app.get(PrismaService);
+      const stored = await prisma.document.findUniqueOrThrow({ where: { id: body.id } });
+      expect(existsSync(resolve(stored.filePath))).toBe(true);
+
+      await http().delete(`/documents/${body.id}`).set('Authorization', mallory).expect(404);
+      await http().delete(`/documents/${body.id}`).set('Authorization', alice).expect(204);
+
+      await http().get(`/documents/${body.id}`).set('Authorization', alice).expect(404);
+      expect(existsSync(resolve(stored.filePath))).toBe(false);
+      expect(await prisma.llmInteraction.count({ where: { documentId: body.id } })).toBe(0);
     });
   });
 

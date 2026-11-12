@@ -451,3 +451,11 @@ button.link-button:hover {
   align-items: center;
   margin-bottom: 16px;
 }
+button.danger {
+  border-color: var(--error);
+  color: var(--error);
+}
+button.danger:hover {
+  background: var(--error);
+  color: var(--paper);
+}

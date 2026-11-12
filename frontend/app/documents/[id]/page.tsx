@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { apiFetch, errorMessage } from '@/lib/api';
 import { CitedText, type Source } from './citations';
 
@@ -131,6 +131,7 @@ async function fetchDocument(id: string): Promise<DocumentData> {
 
 export default function DocumentPage() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
   const [data, setData] = useState<DocumentData | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   /** Page shown in the PDF viewer (set by "Show page N in the PDF"). */
@@ -215,6 +216,21 @@ export default function DocumentPage() {
     }
   }
 
+  async function deleteDocument() {
+    const name = data?.document.originalName ?? 'this document';
+    if (
+      !window.confirm(
+        `Delete "${name}" permanently?\n\nThe file, the text read from it and all its explanations, questions and answers are erased from this machine. This cannot be undone.`,
+      )
+    ) {
+      return;
+    }
+    setError(null);
+    const res = await apiFetch(`/documents/${id}`, { method: 'DELETE' });
+    if (res.ok) router.replace('/documents');
+    else setError(await errorMessage(res));
+  }
+
   function reprocess() {
     if (
       window.confirm(
@@ -248,12 +264,20 @@ export default function DocumentPage() {
         onRetryReading={() => queue('process')}
         onRetryExplanation={() => queue('explain')}
       />
-      {ready && !busy && (
+      {!busy && (
         <div className="button-row left doc-actions">
-          <button type="button" onClick={reprocess}>
-            Reprocess
+          {ready && (
+            <button
+              type="button"
+              onClick={reprocess}
+              title="Read the document and write the explanation again (e.g. after changing the model)"
+            >
+              Reprocess
+            </button>
+          )}
+          <button type="button" className="danger" onClick={deleteDocument}>
+            Delete
           </button>
-          <small>Read the document and write the explanation again (e.g. after changing the model).</small>
         </div>
       )}
 

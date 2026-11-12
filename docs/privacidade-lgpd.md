@@ -23,7 +23,7 @@ A **instalação** usa a internet uma vez: pacotes npm, imagens Docker e o model
 | --- | --- | --- | --- |
 | Arquivos enviados (PDF, imagens) | Upload do usuário | Pasta `backend/uploads/` (disco local) | Somente o dono do documento, pela rota autenticada `GET /documents/:id/file` |
 | Texto extraído (OCR / camada de texto) | Processamento local | PostgreSQL local (`Document.extractedText`) | Somente o dono |
-| Perguntas, respostas e explicações | Usuário / LLM local | PostgreSQL local (`LlmInteraction`) | Somente o dono |
+| Perguntas, respostas e explicações, com os trechos do documento usados como fonte | Usuário / LLM local | PostgreSQL local (`LlmInteraction`) | Somente o dono |
 | Nome, e-mail e papel do usuário | Cadastro feito pelo administrador (ou configuração inicial) | PostgreSQL local (`User`) e cookie de sessão | O próprio usuário; o administrador vê a lista de usuários |
 | Senha | Usuário | PostgreSQL local, **somente o hash scrypt com sal** (a senha nunca é armazenada) | Ninguém |
 
@@ -55,6 +55,11 @@ Ollama podem verificar atualizações por conta própria.
 - Autenticação em todas as rotas de documentos; cada usuário só acessa os próprios
   documentos (um documento de outra pessoa responde 404, igual a um inexistente).
 - Arquivos enviados não são públicos (não há servidor de arquivos estático).
+- Exclusão de documentos (direito de eliminação, art. 18): o botão "Delete" apaga o
+  arquivo do disco, o texto extraído e todas as explicações, perguntas e respostas
+  (inclusive os trechos guardados como fonte das citações). Não há cópia de segurança
+  automática: o dado deixa de existir na aplicação. Backups feitos pela organização
+  (do disco ou do banco) precisam seguir a mesma política.
 - CORS restrito à origem do frontend.
 - Banco e LLM acessíveis apenas em `127.0.0.1` no `docker-compose.yml`.
 - Respostas da LLM restritas ao conteúdo do documento, com citação de página e checagem
@@ -62,7 +67,7 @@ Ollama podem verificar atualizações por conta própria.
 
 ## O que ainda falta
 
-- Exclusão de documentos e dos dados derivados (direito de eliminação, art. 18).
+- Exclusão de contas de usuário (com seus documentos) pelo administrador.
 - Registro de auditoria: quem acessou ou perguntou o quê (registro das operações, art. 37).
 - Permissões por equipe (acesso mínimo necessário).
 - Política de retenção e detecção de dados sensíveis.

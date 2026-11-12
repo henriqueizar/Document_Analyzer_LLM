@@ -1,6 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { DocumentsService } from './documents.service';
+import { existsSync } from 'fs';
+import { mkdtemp, writeFile } from 'fs/promises';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { PrismaService } from '../prisma/prisma.service';
 import { ProcessingService } from './processing.service';
 import { LlmService } from '../llm/llm.service';
@@ -22,9 +26,12 @@ function makePrisma(originalName: string, overrides: Record<string, unknown> = {
   return {
     document: {
       findFirst: jest.fn().mockResolvedValue(doc),
+      delete: jest.fn().mockResolvedValue(doc),
       update: jest.fn().mockImplementation(({ data }) => Promise.resolve({ ...doc, ...data })),
     },
+    $transaction: jest.fn(async (ops: Promise<unknown>[]) => Promise.all(ops)),
     llmInteraction: {
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
       create: jest.fn().mockResolvedValue({}),
       findMany: jest.fn().mockResolvedValue([]),
     },
@@ -186,5 +193,36 @@ describe('DocumentsService', () => {
       { question: 'q1', answer: 'a1 [p. 1]' },
       { question: 'q2', answer: 'a2 [p. 1]' },
     ]);
+  });
+
+  describe('deletion', () => {
+    it('deletes the interactions, the document and the file', async () => {
+      const dir = await mkdtemp(join(tmpdir(), 'del-'));
+      const file = join(dir, 'doc.pdf');
+      await writeFile(file, 'x');
+      await build('a.pdf', { status: 'COMPLETED', extractedText: 't', explanationStatus: 'COMPLETED', filePath: file });
+      await service.remove('doc-1', OWNER);
+      expect(prisma.llmInteraction.deleteMany).toHaveBeenCalledWith({ where: { documentId: 'doc-1' } });
+      expect(prisma.document.delete).toHaveBeenCalledWith({ where: { id: 'doc-1' } });
+      expect(existsSync(file)).toBe(false);
+    });
+
+    it("answers 404 for another user's document and deletes nothing", async () => {
+      await build('a.pdf');
+      prisma.document.findFirst.mockResolvedValue(null);
+      await expect(service.remove('doc-1', 'mallory@example.com')).rejects.toBeInstanceOf(NotFoundException);
+      expect(prisma.document.delete).not.toHaveBeenCalled();
+    });
+
+    it('refuses while the document is being processed', async () => {
+      await build('a.pdf', { status: 'PROCESSING' });
+      await expect(service.remove('doc-1', OWNER)).rejects.toBeInstanceOf(ConflictException);
+      expect(prisma.document.delete).not.toHaveBeenCalled();
+    });
+
+    it('still succeeds when the file was already gone', async () => {
+      await build('a.pdf', { status: 'FAILED', filePath: '/nonexistent/file.pdf' });
+      await expect(service.remove('doc-1', OWNER)).resolves.toBeUndefined();
+    });
   });
 });
