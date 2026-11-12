@@ -150,6 +150,68 @@ testes e detalhes de arquitetura, veja [`docs/desenvolvimento.md`](docs/desenvol
 Next.js 16 · NestJS 11 · Prisma 5 + PostgreSQL · Ollama (qwen3:8b) · tesseract.js 7 ·
 pdf.js (pdf-parse 2) · pdf-lib
 
----
+## Autoria
 
-Desenvolvido por Henrique Izar, com auxílio de ferramentas de IA (ChatGPT e Claude Code).
+**Autor: Henrique Izar**
+
+Desenvolvi a base deste projeto entre dezembro de 2025 e maio de 2026: a arquitetura frontend/backend, o
+upload e a persistência de documentos, a leitura com OCR, a integração com a LLM e o banco
+de dados. Com o projeto parado, tive a ideia de melhorá-lo com o
+[Claude Code](https://claude.com/claude-code), para estudar a ferramenta e entender os
+seus potenciais e os seus limites. O projeto não foi feito por IA: a base, a parte mais
+custosa, é minha. O Claude Code refinou, sob a minha direção, com decisões de produto e
+revisão a cada etapa. O histórico do git mostra as duas fases.
+
+O que mudou nessa segunda fase:
+
+- **Segurança da informação.** Por engenharia de prompt, instruí o Claude Code a
+  verificar, a cada entrega, se algum dado sai da máquina e se o que foi feito segue os
+  critérios de segurança da informação da LGPD. Resultado: o login com Google foi
+  substituído por contas locais (senhas com hash scrypt, bloqueio após tentativas
+  erradas), os arquivos deixaram de ser públicos, cada usuário só acessa os próprios
+  documentos, a telemetria e as fontes externas foram removidas, e o app ganhou o
+  [inventário de dados pessoais](docs/privacidade-lgpd.md) e o teste automático em
+  contêiner sem internet (`verify:offline`).
+- **Interface mais intuitiva, mantendo a identidade visual** de terminal (fonte
+  pixelada, bordas retas, sem cara de "app de IA"): progresso da leitura em tempo real,
+  upload por arrastar, chat no estilo de aplicativo de mensagens, citações clicáveis que
+  mostram o trecho e a página do PDF, e interface em português e inglês.
+- **Banco de dados estruturado:** migrações versionadas e aplicadas automaticamente ao
+  iniciar, status separados para leitura e explicação, as fontes de cada resposta
+  guardadas com ela (para conferência) e traduções armazenadas para não serem refeitas.
+- **Uso de recursos.** OCR e LLM são pesados, então:
+  - documentos são processados em segundo plano, um por vez, e o upload responde na
+    hora; o trabalho interrompido é retomado quando o servidor reinicia;
+  - documentos longos enviam ao modelo só os trechos relevantes (BM25), em vez do
+    documento inteiro; o tamanho de contexto é aplicado de fato (a API compatível com
+    OpenAI o ignorava); o modo de raciocínio do modelo fica desligado e o histórico da
+    conversa tem orçamento fixo;
+  - PDFs são lidos e renderizados em memória, sem ImageMagick/Ghostscript nem arquivos
+    temporários, e só as páginas sem texto passam pelo OCR;
+  - no Mac, o Ollama roda nativo para usar a GPU (no Docker, rodaria só na CPU);
+  - perguntas que o modo estrito não pode responder são recusadas antes de chamar o
+    modelo.
+- **Engenharia de prompt com medição.** Os prompts foram refinados em muitas rodadas,
+  sempre medidas com a avaliação automatizada (`npm run eval:llm`) rodando o modelo
+  real. Cada falha observada virou um caso de teste e, quando o prompt não bastava, uma
+  checagem em código (veja [Decisões contra alucinação](#decisões-contra-alucinação)).
+- **Testes:** dos 5 testes iniciais gerados pelos frameworks para 228 testes unitários,
+  18 testes ponta a ponta da API e a avaliação do modelo.
+- **Robustez da leitura:** PDFs danificados, digitalizações em JPEG 2000, nomes de
+  arquivo com acentos e fontes sem mapa de caracteres.
+
+### Limites observados do Claude Code
+
+Também anotei onde a ferramenta errou ou dependeu de mim:
+
+- Instruções de atualização incompletas: faltou regenerar o cliente do Prisma depois de
+  uma migração, e o app quebrou na minha máquina. A correção foi automatizar
+  (`npm run db:update` ao iniciar) e testar o caminho de atualizar uma instalação
+  existente.
+- O ambiente dele não tinha a LLM real: cada ajuste de prompt dependia de eu rodar a
+  avaliação no meu Mac. Uma regra nova para um caso (e-mails de autores) causou uma
+  regressão em outro (escolha de alternativas de prova), percebida só pela avaliação.
+- Correções que tratavam um sintoma: uma lista de frases para bloquear questões de prova
+  resolvia o caso, mas não a categoria. Questionei, e a solução foi revista para algo
+  mais honesto (responder que a pergunta exige interpretação, em vez de dizer que a
+  informação não existe).
