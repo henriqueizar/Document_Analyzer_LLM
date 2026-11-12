@@ -18,6 +18,22 @@ cada informação.
 
 > Status: em desenvolvimento ativo. Veja o [roteiro](#roteiro).
 
+## Em números
+
+| | |
+| --- | --- |
+| Respostas factuais corretas e com a página certa (modelo real, qwen3:8b) | **16/16** |
+| Recusas corretas para o que não está no documento ou exige julgamento | **9/11** na execução real; as 2 falhas foram corrigidas e passam ao reproduzir as respostas contra o código atual |
+| Tempo mediano por pergunta (qwen3:8b local, no Mac do autor) | **1,8 s** |
+| Conexões externas durante o uso | **0**, verificado por teste automático num contêiner sem rota para a internet |
+| Modos de falha da LLM documentados, cada um com defesa e teste | **10** |
+| Testes automatizados | de **5** (gerados pelos frameworks) para **228** unitários + **18** ponta a ponta |
+| Reparo de fontes sem mapa de caracteres | **0** linhas alteradas indevidamente em 1.051 linhas de 55 PDFs |
+| Idiomas (interface, explicações e respostas) | **2** (português e inglês) |
+
+Números da execução de 12/11/2026 de `npm run eval:llm` (27 casos com documentos
+fictícios). A execução completa com o código atual está pendente.
+
 ## Como funciona
 
 ```mermaid
@@ -72,7 +88,7 @@ está no documento, bloqueio de julgamentos no modo estrito e o modo de interpre
 
 | Execução | Modelo | Resultado |
 | --- | --- | --- |
-| 12/11/2026 | qwen3:8b, contexto 8192, Mac | 25/27. As duas falhas (escolher alternativas de prova) motivaram a checagem da pergunta; as respostas que falharam passam quando reproduzidas contra o código atual |
+| 12/11/2026 | qwen3:8b, contexto 8192, Mac | 25/27: 16/16 factuais com a página certa, 9/11 recusas. As duas falhas (escolher alternativas de prova) motivaram a checagem da pergunta; as respostas que falharam passam quando reproduzidas contra o código atual |
 
 <!-- TODO: nova execução completa com o código atual -->
 
