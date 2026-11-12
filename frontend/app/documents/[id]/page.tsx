@@ -16,9 +16,26 @@ interface Interaction {
 
 type Status = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
 
+interface DocumentInfo {
+  id: string;
+  originalName: string;
+  /** Reading the document: PENDING = queued, PROCESSING = reading. */
+  status: Status;
+  failureReason: string | null;
+  /** The automatic explanation, tracked apart (null for older documents). */
+  explanationStatus: Status | null;
+  explanationError: string | null;
+}
+
 interface DocumentData {
-  document: { id: string; originalName: string; status: Status };
+  document: DocumentInfo;
   interactions: Interaction[];
+}
+
+const IN_PROGRESS: (Status | null)[] = ['PENDING', 'PROCESSING'];
+
+function inProgress(d: DocumentInfo): boolean {
+  return IN_PROGRESS.includes(d.status) || (d.status === 'COMPLETED' && IN_PROGRESS.includes(d.explanationStatus));
 }
 
 const IMAGE_NAME = /\.(png|jpe?g|webp|bmp|tiff?)$/i;
@@ -63,6 +80,49 @@ function LlmText({
   );
 }
 
+/** What is happening with the document right now, and what the user can do. */
+function StatusBox({
+  document,
+  onRetryReading,
+  onRetryExplanation,
+}: {
+  document: DocumentInfo;
+  onRetryReading: () => void;
+  onRetryExplanation: () => void;
+}) {
+  const { status, explanationStatus } = document;
+  if (status === 'PENDING') {
+    return <div className="status"><p>In the queue: this document will be read shortly. This page updates by itself.</p></div>;
+  }
+  if (status === 'PROCESSING') {
+    return <div className="status"><p>Reading the document (text and OCR)...</p></div>;
+  }
+  if (status === 'FAILED') {
+    return (
+      <div className="status">
+        <p>Could not read this document: {document.failureReason ?? 'unknown error.'}</p>
+        <button type="button" onClick={onRetryReading}>Retry</button>
+      </div>
+    );
+  }
+  if (explanationStatus === 'PENDING' || explanationStatus === 'PROCESSING') {
+    return (
+      <div className="status">
+        <p>Writing the explanation... You can already ask questions below.</p>
+      </div>
+    );
+  }
+  if (explanationStatus === 'FAILED') {
+    return (
+      <div className="status">
+        <p>The explanation could not be written: {document.explanationError ?? 'unknown error.'} You can still ask questions.</p>
+        <button type="button" onClick={onRetryExplanation}>Retry explanation</button>
+      </div>
+    );
+  }
+  return null;
+}
+
 async function fetchDocument(id: string): Promise<DocumentData> {
   const res = await apiFetch(`/documents/${id}`);
   if (!res.ok) throw new Error(await errorMessage(res));
@@ -78,7 +138,6 @@ export default function DocumentPage() {
   const previewRef = useRef<HTMLDivElement>(null);
   const [question, setQuestion] = useState('');
   const [asking, setAsking] = useState(false);
-  const [processing, setProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Initial load
@@ -93,16 +152,15 @@ export default function DocumentPage() {
     };
   }, [id]);
 
-  // While the backend is processing (e.g. started from another tab), refresh
-  // until it finishes.
-  const status = data?.document.status;
+  // Reading and explaining happen in the background: refresh until both are done.
+  const busy = data ? inProgress(data.document) : false;
   useEffect(() => {
-    if (status !== 'PROCESSING') return;
+    if (!busy) return;
     const interval = setInterval(() => {
       fetchDocument(id).then(setData, () => undefined);
     }, POLL_MS);
     return () => clearInterval(interval);
-  }, [id, status]);
+  }, [id, busy]);
 
   // The file is only served to its owner, so fetch it with the bearer token
   // and show it through an object URL (images inline, PDFs in the browser's
@@ -145,19 +203,25 @@ export default function DocumentPage() {
     }
   }
 
-  async function processDocument() {
-    setProcessing(true);
+  /** Queues work in the backend (202) and refreshes; polling takes it from there. */
+  async function queue(action: 'process' | 'explain') {
     setError(null);
     try {
-      const res = await apiFetch(`/documents/${id}/process`, { method: 'POST' });
+      const res = await apiFetch(`/documents/${id}/${action}`, { method: 'POST' });
       if (!res.ok) throw new Error(await errorMessage(res));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Processing failed');
-    }
-    try {
       setData(await fetchDocument(id));
-    } finally {
-      setProcessing(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Request failed');
+    }
+  }
+
+  function reprocess() {
+    if (
+      window.confirm(
+        'Read the document and write the explanation again? Your questions and answers are kept.',
+      )
+    ) {
+      queue('process');
     }
   }
 
@@ -179,22 +243,17 @@ export default function DocumentPage() {
     <div>
       <h1>{document.originalName}</h1>
 
-      {/* Status (only while the document is not ready) */}
-      {!ready && (
-        <div className="status">
-          {document.status === 'PROCESSING' || processing ? (
-            <p>Processing (OCR + LLM)... this page updates when it is done.</p>
-          ) : document.status === 'FAILED' ? (
-            <>
-              <p>Processing failed{error ? `: ${error}` : '.'}</p>
-              <button type="button" onClick={processDocument}>Retry</button>
-            </>
-          ) : (
-            <>
-              <p>This document has not been processed yet.</p>
-              <button type="button" onClick={processDocument}>Process now</button>
-            </>
-          )}
+      <StatusBox
+        document={document}
+        onRetryReading={() => queue('process')}
+        onRetryExplanation={() => queue('explain')}
+      />
+      {ready && !busy && (
+        <div className="button-row left doc-actions">
+          <button type="button" onClick={reprocess}>
+            Reprocess
+          </button>
+          <small>Read the document and write the explanation again (e.g. after changing the model).</small>
         </div>
       )}
 
@@ -258,7 +317,7 @@ export default function DocumentPage() {
           {asking ? 'Thinking...' : 'Send'}
         </button>
       </form>
-      {error && ready && (
+      {error && (
         <p role="alert" className="error">Error: {error}</p>
       )}
     </div>

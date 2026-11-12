@@ -11,7 +11,7 @@ const ACCEPT = '.pdf,.png,.jpg,.jpeg,.webp,.bmp,.tif,.tiff';
 const SUPPORTED = /\.(pdf|png|jpe?g|webp|bmp|tiff?)$/i;
 const MAX_BYTES = 20 * 1024 * 1024;
 
-type Phase = 'idle' | 'uploading' | 'processing';
+type Phase = 'idle' | 'uploading';
 
 function formatSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
@@ -94,12 +94,7 @@ export default function UploadPage() {
       const uploadedId = (await uploadRes.json()).id as string;
       setDocId(uploadedId);
 
-      setPhase('processing');
-      const processRes = await apiFetch(`/documents/${uploadedId}/process`, {
-        method: 'POST',
-      });
-      if (!processRes.ok) throw new Error(await errorMessage(processRes));
-
+      // Reading and explaining run in the background; the document page shows progress.
       router.push(`/documents/${uploadedId}`);
     } catch (err) {
       console.error(err);
@@ -108,12 +103,7 @@ export default function UploadPage() {
     }
   }
 
-  const label =
-    phase === 'uploading'
-      ? 'Uploading'
-      : phase === 'processing'
-        ? 'Processing (OCR + LLM)'
-        : 'Upload';
+  const label = phase === 'uploading' ? 'Uploading' : 'Upload';
 
   return (
     <div className="centered">
@@ -164,9 +154,7 @@ export default function UploadPage() {
             </span>
           )}
         </button>
-        {phase === 'processing' && (
-          <small>Reading the document and writing the explanation. This can take a minute.</small>
-        )}
+        <small>After uploading, the document opens and is read in the background.</small>
       </form>
 
       {message && <p role="alert">{message}</p>}

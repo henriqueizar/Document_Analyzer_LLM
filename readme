@@ -173,13 +173,18 @@ Local accounts only; no external identity provider.
 
 ### Processing flow
 
-1. User uploads a document (PDF or image, max 20 MB; other types are rejected with 400)
-2. Document is stored and marked as PENDING
-3. `POST /documents/:id/process` extracts the text (PROCESSING)
-4. Status becomes COMPLETED, or FAILED with a 422 and the reason
-5. The extracted text is explained by the LLM
-6. The user can ask questions about the document
-7. All interactions are stored for history
+1. User uploads a document (PDF or image, max 20 MB; other types are rejected with 400).
+   The upload returns at once and the document page opens.
+2. In the background, one document at a time (OCR and the local LLM are heavy):
+   - **reading**: in the queue -> reading (text layer / OCR) -> ready, or failed with the
+     reason shown on the page;
+   - **explanation**: written by the LLM once reading succeeded. If the LLM is unavailable
+     only the explanation fails ("Retry explanation"); the document stays open to
+     questions.
+3. The page and the "My documents" list update by themselves while work is in progress.
+4. "Reprocess" reads the document and writes the explanation again (e.g. after changing
+   the model); questions and answers are kept. Work interrupted by a restart is resumed
+   when the backend starts.
 
 ### Text extraction
 

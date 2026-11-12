@@ -445,3 +445,9 @@ button.link-button:hover {
   background: none;
   color: var(--ink);
 }
+
+/* Document page: actions under the title */
+.doc-actions {
+  align-items: center;
+  margin-bottom: 16px;
+}
