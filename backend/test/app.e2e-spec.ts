@@ -114,6 +114,23 @@ describe('Documents API (e2e)', () => {
       .expect(201);
     expect(ask.body).toMatchObject({ role: 'QUESTION', answer: 'ANSWER TO: What is the due date?' });
     expect(ask.body.sources).toEqual([{ page: 3, text: 'PAGE 3 DUE DATE DECEMBER' }]);
+    expect(ask.body.mode).toBe('STRICT');
+
+    // interpretation only when explicitly requested, and stored as such
+    const interpreted = await http()
+      .post(`/documents/${id}/ask`)
+      .set('Authorization', alice)
+      .send({ question: 'Is the due date reasonable?', interpret: true })
+      .expect(201);
+    expect(interpreted.body.mode).toBe('INTERPRETATION');
+    expect(llmStub.askQuestion).toHaveBeenLastCalledWith(expect.anything(), 'Is the due date reasonable?', expect.any(Array), 'INTERPRETATION');
+    // anything but a literal true is a normal (strict) question
+    const strict = await http()
+      .post(`/documents/${id}/ask`)
+      .set('Authorization', alice)
+      .send({ question: 'And the total?', interpret: 'yes' })
+      .expect(201);
+    expect(strict.body.mode).toBe('STRICT');
 
     const list = await http().get('/documents').set('Authorization', alice).expect(200);
     expect(list.body.map((d: { id: string }) => d.id)).toContain(id);

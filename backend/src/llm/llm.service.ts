@@ -4,6 +4,7 @@ import { OllamaClient, ollamaConfigFromEnv } from './ollama.client';
 import { formatPassages, leading, selectPassages, splitIntoPassages, Passage } from './passages';
 import { detectLanguage, Language } from './language';
 import {
+  AnswerMode,
   answerMessages,
   DocumentContext,
   NOT_FOUND,
@@ -32,7 +33,7 @@ export interface LlmResult {
 const CHARS_PER_TOKEN = 3;
 /** Tokens kept free for instructions, chat history and the answer itself. */
 const RESERVED_TOKENS = { answer: 1800, explain: 1600 };
-const MAX_TOKENS = { answer: 500, explain: 700 };
+const MAX_TOKENS = { answer: 500, explain: 700, interpretation: 700 };
 /**
  * Share of the context window for earlier questions and answers. As many
  * recent turns as fit are sent (whole conversation when it is short); the
@@ -80,8 +81,24 @@ export class LlmService {
     return { text: explanation, sources };
   }
 
-  /** Answers a question using only passages of the document. */
-  async askQuestion(document: DocumentInput, question: string, history: Turn[] = []): Promise<LlmResult> {
+  /**
+   * Answers a question about the document.
+   *
+   * STRICT (default): only what the document states. An answer that cannot be
+   * tied to the excerpts (no citation from the model and no sentence that
+   * clearly matches a passage) is replaced by the refusal sentence, so small
+   * talk or invented facts ("Tenho 3 anos de idade") never reach the user.
+   *
+   * INTERPRETATION: only when the user explicitly asks for it. The model may
+   * analyse; the answer is kept and the application labels it as interpretation.
+   * Page and number checks apply in both modes.
+   */
+  async askQuestion(
+    document: DocumentInput,
+    question: string,
+    history: Turn[] = [],
+    mode: AnswerMode = 'STRICT',
+  ): Promise<LlmResult> {
     const lang = detectLanguage(question, detectLanguage(document.text));
     const passages = splitIntoPassages(document.text);
     const recent = this.fitHistory(history);
@@ -93,9 +110,9 @@ export class LlmService {
     const doc = this.context(document, passages, selection.passages);
     const sources = toSources(selection.passages);
 
-    const raw = await this.client.chat(answerMessages(lang, doc, question, recent), {
+    const raw = await this.client.chat(answerMessages(lang, doc, question, recent, mode), {
       temperature: 0,
-      maxTokens: MAX_TOKENS.answer,
+      maxTokens: mode === 'INTERPRETATION' ? MAX_TOKENS.interpretation : MAX_TOKENS.answer,
     });
     const answer = stripPreamble(raw) || '';
     if (!answer) {
@@ -106,8 +123,15 @@ export class LlmService {
     // (e.g. one part found, another not) and are kept as they are.
     if (isNotFound(answer) && !hasCitation(answer)) return { text: NOT_FOUND[lang], sources };
 
+    // Cite, by code, sentences that clearly come from a passage.
+    const cited = attributeCitations(answer, sources);
+    if (mode === 'STRICT' && !hasCitation(cited)) {
+      this.logger.warn(`Answer not tied to the document, replaced by the refusal: ${JSON.stringify(answer.slice(0, 120))}`);
+      return { text: NOT_FOUND[lang], sources };
+    }
+
     return {
-      text: this.withGroundingCheck(answer, doc, lang, { requireCitation: true, ignore: question }),
+      text: this.withGroundingCheck(cited, doc, lang, { requireCitation: true, ignore: question }),
       sources,
     };
   }

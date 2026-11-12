@@ -88,9 +88,11 @@ export class DocumentsController {
   async ask(
     @Param('id') id: string,
     @Body('question') question: string,
+    @Body('interpret') interpret: unknown,
     @CurrentUser() user: AuthUser,
   ) {
-    return this.documentsService.ask(id, question, user.email);
+    // interpretation only when explicitly requested
+    return this.documentsService.ask(id, question, user.email, interpret === true);
   }
 
   /** Authenticated replacement for the old public /uploads static route. */

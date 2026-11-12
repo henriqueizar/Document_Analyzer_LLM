@@ -12,6 +12,7 @@ import * as path from 'path';
 import * as fs from 'fs/promises';
 import { LlmService } from '../llm/llm.service';
 import { ProcessingService } from './processing.service';
+import type { AnswerMode } from '../llm/prompts';
 import { repairMisdecodedName } from '../common/file-names';
 import { stripPreamble } from '../llm/clean-response';
 
@@ -147,7 +148,8 @@ export class DocumentsService implements OnModuleInit {
     );
   }
 
-  async ask(documentId: string, question: string, userEmail: string) {
+  async ask(documentId: string, question: string, userEmail: string, interpret = false) {
+    const mode: AnswerMode = interpret ? 'INTERPRETATION' : 'STRICT';
     if (!question?.trim()) {
       throw new BadRequestException('Question must not be empty');
     }
@@ -164,16 +166,18 @@ export class DocumentsService implements OnModuleInit {
       // the LLM keeps as many of these as fit in its history budget
       take: 50,
     });
-    const history = previous.reverse().map((i) => ({
-      question: i.question,
+    const history = previous.reverse().map((i) => {
       // earlier automatic warnings are for the user, not for the model
-      answer: i.answer.replace(/\n*⚠[^\n]*$/u, '').trim(),
-    }));
+      const answer = i.answer.replace(/\n*⚠[^\n]*$/u, '').trim();
+      // an earlier interpretation must never be read back as a fact of the document
+      return { question: i.question, answer: i.mode === 'INTERPRETATION' ? `[interpretation] ${answer}` : answer };
+    });
 
     const answer = await this.llmService.askQuestion(
       { name: document.originalName, text: document.extractedText },
       question,
       history,
+      mode,
     );
 
     return this.prisma.llmInteraction.create({
@@ -183,6 +187,7 @@ export class DocumentsService implements OnModuleInit {
         question,
         answer: answer.text,
         sources: answer.sources as unknown as Prisma.InputJsonValue,
+        mode,
       },
     });
   }

@@ -86,10 +86,45 @@ describe('LlmService', () => {
       expect(answer).toMatch(/⚠ Verificação automática: a resposta contém 15.000,00, que não aparece no documento/);
     });
 
-    it('flags answers without any page citation', async () => {
+    it('cites by code an uncited answer that clearly comes from the document', async () => {
       fetchMock.mockResolvedValue(ok('O contrato é entre ACME e Beta.'));
       const { text: answer } = await new LlmService().askQuestion(contract, 'Quem são as partes?');
-      expect(answer).toMatch(/não cita nenhuma página/);
+      expect(answer).toBe('O contrato é entre ACME e Beta [p. 1].');
+    });
+
+    it.each([
+      ['small talk', 'oi tudo bem?', 'Tudo bem! E com você?'],
+      ['questions about the assistant', 'Quantos anos você tem?', 'Tenho 3 anos de idade.'],
+      ['judgements the document does not state', 'Este contrato é vantajoso?', 'Sim, é um bom negócio para a ACME.'],
+    ])('strict mode: replaces an answer not tied to the document (%s) by the refusal', async (_, q, invented) => {
+      fetchMock.mockResolvedValue(ok(invented));
+      const { text } = await new LlmService().askQuestion(contract, q);
+      expect(text).toBe('Não encontrei essa informação no documento.');
+    });
+
+    it('strict mode: tells the model not to pick exercise answers, judge or chat', async () => {
+      fetchMock.mockResolvedValue(ok('x [p. 1].'));
+      await new LlmService().askQuestion(contract, 'Qual a resposta correta da questão 24?');
+      expect(system()).toMatch(/Não escolha a resposta de questões ou exercícios/);
+      expect(system()).toMatch(/cumprimentos, conversa e perguntas sobre você/);
+    });
+
+    it('interpretation mode: uses its own rules and keeps an analysis, with the usual checks', async () => {
+      fetchMock.mockResolvedValue(
+        ok('No documento: aviso prévio de 60 dias [p. 3].\n\nInterpretação: o prazo é longo para a contratante.'),
+      );
+      const { text } = await new LlmService().askQuestion(contract, 'O prazo de rescisão é bom para nós?', [], 'INTERPRETATION');
+      expect(system()).toMatch(/pediu explicitamente uma INTERPRETAÇÃO/);
+      expect(system()).toMatch(/"No documento:"/);
+      expect(text).toMatch(/^No documento: aviso prévio de 60 dias \[p\. 3\]\./);
+      expect(text).toMatch(/Interpretação: o prazo é longo/);
+      expect(text).not.toMatch(/⚠/);
+    });
+
+    it('interpretation mode still refuses small talk', async () => {
+      fetchMock.mockResolvedValue(ok('Não encontrei essa informação no documento.'));
+      const { text } = await new LlmService().askQuestion(contract, 'oi tudo bem?', [], 'INTERPRETATION');
+      expect(text).toBe('Não encontrei essa informação no documento.');
     });
 
     it('does not flag numbers that come from the question itself', async () => {

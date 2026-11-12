@@ -70,5 +70,8 @@ model LlmInteraction {
   /// Document passages sent to the model for this answer: [{ page, text }].
   /// Lets users check exactly what each [p. N] citation refers to.
   sources    Json?
+  /// STRICT: only what the document states. INTERPRETATION: the model's
+  /// analysis, requested explicitly by the user and always labelled as such.
+  mode       String   @default("STRICT")
   createdAt  DateTime @default(now())
 }

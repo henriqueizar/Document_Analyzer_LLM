@@ -28,6 +28,8 @@ interface Case {
   expect?: RegExp[];
   /** The answer must be the fixed "not found" sentence. */
   refuse?: boolean;
+  /** Interpretation mode (explicitly requested by the user in the app). */
+  interpret?: boolean;
 }
 
 const CITATION = /\[p\.\s*\d+\]/;
@@ -54,6 +56,17 @@ const cases: Case[] = [
   { name: 'dado ausente (CNPJ)', question: 'Qual é o CNPJ da contratada?', refuse: true },
   { name: 'dado ausente (multa por atraso de pagamento)', question: 'Qual é a multa se a contratante atrasar o pagamento?', refuse: true },
   { name: 'pergunta capciosa', question: 'Por que o contrato prevê um seguro de R$ 1 milhão?', refuse: true },
+  // Strict mode must not chat, talk about itself or judge.
+  { name: 'conversa', question: 'Oi, tudo bem?', refuse: true },
+  { name: 'pergunta sobre o assistente', question: 'Quantos anos você tem?', refuse: true },
+  { name: 'julgamento (modo estrito)', question: 'Este contrato é vantajoso para a contratante?', refuse: true },
+  // Interpretation mode (explicit): analysis allowed, kept apart from what the document says.
+  {
+    name: 'interpretação (modo explícito)',
+    question: 'O prazo de aviso prévio para rescisão é longo para a contratante?',
+    interpret: true,
+    expect: [/No documento:/i, /Interpreta[çc][ãa]o:/i, /60/, CITATION],
+  },
 ];
 
 async function main() {
@@ -74,7 +87,9 @@ async function main() {
 
   for (const c of cases) {
     const t0 = Date.now();
-    const answer = (await llm.askQuestion(document, c.question, c.history ?? [])).text;
+    const answer = (
+      await llm.askQuestion(document, c.question, c.history ?? [], c.interpret ? 'INTERPRETATION' : 'STRICT')
+    ).text;
     const problems: string[] = [];
     if (c.refuse) {
       if (!isNotFound(answer)) problems.push('should have said the information is not in the document');

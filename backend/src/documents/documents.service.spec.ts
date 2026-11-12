@@ -94,6 +94,7 @@ describe('DocumentsService', () => {
         { name: 'a.png', text: 'text' },
         'What is the total?',
         [],
+        'STRICT',
       );
       expect(prisma.llmInteraction.create).toHaveBeenCalled();
     });
@@ -189,10 +190,15 @@ describe('DocumentsService', () => {
     expect(prisma.llmInteraction.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { documentId: 'doc-1', role: 'QUESTION' }, take: 50 }),
     );
-    expect(llm.askQuestion).toHaveBeenCalledWith(expect.anything(), 'q3', [
-      { question: 'q1', answer: 'a1 [p. 1]' },
-      { question: 'q2', answer: 'a2 [p. 1]' },
-    ]);
+    expect(llm.askQuestion).toHaveBeenCalledWith(
+      expect.anything(),
+      'q3',
+      [
+        { question: 'q1', answer: 'a1 [p. 1]' },
+        { question: 'q2', answer: 'a2 [p. 1]' },
+      ],
+      'STRICT',
+    );
   });
 
   describe('deletion', () => {
@@ -223,6 +229,27 @@ describe('DocumentsService', () => {
     it('still succeeds when the file was already gone', async () => {
       await build('a.pdf', { status: 'FAILED', filePath: '/nonexistent/file.pdf' });
       await expect(service.remove('doc-1', OWNER)).resolves.toBeUndefined();
+    });
+  });
+
+  describe('answer modes', () => {
+    it('stores interpretation answers as such when explicitly requested', async () => {
+      await build('a.png', { status: 'COMPLETED', extractedText: 'text' });
+      await service.ask('doc-1', 'Quais os riscos?', OWNER, true);
+      expect(llm.askQuestion).toHaveBeenCalledWith(expect.anything(), 'Quais os riscos?', [], 'INTERPRETATION');
+      expect(prisma.llmInteraction.create).toHaveBeenCalledWith({ data: expect.objectContaining({ mode: 'INTERPRETATION' }) });
+    });
+
+    it('marks earlier interpretations in the history so they are not read as document facts', async () => {
+      await build('a.png', { status: 'COMPLETED', extractedText: 'text' });
+      prisma.llmInteraction.findMany.mockResolvedValue([{ question: 'q1', answer: 'parece arriscado', mode: 'INTERPRETATION' }]);
+      await service.ask('doc-1', 'q2', OWNER);
+      expect(llm.askQuestion).toHaveBeenCalledWith(
+        expect.anything(),
+        'q2',
+        [{ question: 'q1', answer: '[interpretation] parece arriscado' }],
+        'STRICT',
+      );
     });
   });
 });
