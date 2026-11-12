@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { apiFetch, errorMessage } from '@/lib/api';
 import LoadingDots from '../loading-dots';
+import { useI18n, type MessageKey } from '@/lib/i18n';
 
 // Must match backend/src/common/supported-files.ts and the upload size limit.
 const ACCEPT = '.pdf,.png,.jpg,.jpeg,.webp,.bmp,.tif,.tiff';
@@ -20,13 +21,9 @@ function formatSize(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function validate(file: File): string | null {
-  if (!SUPPORTED.test(file.name)) {
-    return 'Unsupported file type. Choose a PDF or an image (png, jpg, webp, bmp, tiff).';
-  }
-  if (file.size > MAX_BYTES) {
-    return `File is too large (${formatSize(file.size)}). The limit is 20 MB.`;
-  }
+function validate(file: File): { key: MessageKey; vars?: Record<string, string> } | null {
+  if (!SUPPORTED.test(file.name)) return { key: 'upload.unsupported' };
+  if (file.size > MAX_BYTES) return { key: 'upload.tooLarge', vars: { size: formatSize(file.size) } };
   return null;
 }
 
@@ -38,18 +35,19 @@ export default function UploadPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [docId, setDocId] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
+  const { t, server } = useI18n();
 
   const busy = phase !== 'idle';
 
   if (status === 'loading') {
-    return <p>Loading session...</p>;
+    return <p>{t('common.loadingSession')}</p>;
   }
 
   if (!session) {
     return (
       <div className="centered">
-        <p>You must be logged in to upload documents.</p>
-        <Link href="/login">Go to login</Link>
+        <p>{t('upload.mustLogin')}</p>
+        <Link href="/login">{t('common.goToLogin')}</Link>
       </div>
     );
   }
@@ -60,7 +58,7 @@ export default function UploadPage() {
     const problem = validate(selected);
     if (problem) {
       setFile(null);
-      setMessage(problem);
+      setMessage(t(problem.key, problem.vars));
       return;
     }
     setFile(selected);
@@ -89,16 +87,16 @@ export default function UploadPage() {
       router.push(`/documents/${uploadedId}`);
     } catch (err) {
       console.error(err);
-      setMessage(`Error: ${err instanceof Error ? err.message : 'upload failed'}`);
+      setMessage(t('common.error', { message: err instanceof Error ? server(err.message) : t('common.requestFailed') }));
       setPhase('idle');
     }
   }
 
-  const label = phase === 'uploading' ? 'Uploading' : 'Upload';
+  const label = phase === 'uploading' ? t('upload.uploading') : t('upload.submit');
 
   return (
     <div className="centered">
-      <h1>Upload Document</h1>
+      <h1>{t('upload.title')}</h1>
 
       <form onSubmit={handleSubmit} className="stack">
         <label
@@ -115,9 +113,9 @@ export default function UploadPage() {
             if (!busy) choose(e.dataTransfer.files[0]);
           }}
         >
-          {file ? 'Change file' : 'Select file'}
+          {file ? t('upload.change') : t('upload.select')}
         </label>
-        <small>Choose or drag your PDF/image here (max. 20MB)</small>
+        <small>{t('upload.hint')}</small>
 
         <input
           id="file-upload"
@@ -133,7 +131,7 @@ export default function UploadPage() {
 
         {file && (
           <p>
-            Selected: <strong>{file.name}</strong> ({formatSize(file.size)})
+            {t('upload.selected')} <strong>{file.name}</strong> ({formatSize(file.size)})
           </p>
         )}
 
@@ -141,11 +139,11 @@ export default function UploadPage() {
           {label}
           {busy && <LoadingDots />}
         </button>
-        <small>After uploading, the document opens and is read in the background.</small>
+        <small>{t('upload.background')}</small>
       </form>
 
       {message && <p role="alert">{message}</p>}
-      {docId && !busy && <Link href={`/documents/${docId}`}>Open the document</Link>}
+      {docId && !busy && <Link href={`/documents/${docId}`}>{t('upload.open')}</Link>}
     </div>
   );
 }

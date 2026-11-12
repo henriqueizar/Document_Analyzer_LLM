@@ -5,10 +5,12 @@ import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
+import { useI18n } from '@/lib/i18n';
 
 export default function Home() {
   const { data: session, status } = useSession();
   const router = useRouter();
+  const { t } = useI18n();
 
   useEffect(() => {
     if (status === 'unauthenticated') router.replace('/login');
@@ -26,26 +28,26 @@ export default function Home() {
       .catch(() => undefined);
   }, [email, router]);
 
-  if (!session) return <p>Loading...</p>;
+  if (!session) return <p>{t('common.loading')}</p>;
 
   const { user } = session;
   const isAdmin = user.role === 'ADMIN';
 
   return (
     <div className="centered">
-      <h1>Document LLM Analyzer</h1>
+      <h1>{t('app.title')}</h1>
       <p>
-        Hello, {user.name ?? user.email}
-        {isAdmin && <span className="badge">Administrator</span>}
+        {t('home.hello', { name: user.name ?? user.email ?? '' })}
+        {isAdmin && <span className="badge">{t('role.admin')}</span>}
       </p>
       <div className="button-row">
-        <Link href="/upload" className="button-link">Upload document</Link>
-        <Link href="/documents" className="button-link">My documents</Link>
+        <Link href="/upload" className="button-link">{t('home.upload')}</Link>
+        <Link href="/documents" className="button-link">{t('home.documents')}</Link>
       </div>
       <div className="button-row">
-        {isAdmin && <Link href="/users" className="button-link">Users</Link>}
-        <Link href="/account" className="button-link">Account</Link>
-        <button onClick={() => signOut({ callbackUrl: '/login' })}>Log out</button>
+        {isAdmin && <Link href="/users" className="button-link">{t('home.users')}</Link>}
+        <Link href="/account" className="button-link">{t('home.account')}</Link>
+        <button onClick={() => signOut({ callbackUrl: '/login' })}>{t('home.logout')}</button>
       </div>
     </div>
   );

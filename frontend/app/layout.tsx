@@ -5,7 +5,7 @@ import "@fontsource/vt323/latin-ext.css";
 import "./globals.css";
 import Providers from './providers';
 import NavBar from './nav-bar';
-import Link from 'next/link';
+import Footer from './footer';
 
 export const metadata: Metadata = {
   title: "Document LLM Analyzer",
@@ -18,14 +18,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
+    <html lang="pt-BR">
       <body>
         <Providers>
           <NavBar />
           <main className="page">{children}</main>
-          <footer className="footer">
-            <Link href="/privacy">This program runs entirely on this machine.</Link>
-          </footer>
+          <Footer />
         </Providers>
       </body>
     </html>

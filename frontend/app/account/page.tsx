@@ -4,6 +4,7 @@ import { useSession } from 'next-auth/react';
 import Link from 'next/link';
 import { useState } from 'react';
 import { apiFetch, errorMessage } from '@/lib/api';
+import { useI18n, type Language } from '@/lib/i18n';
 
 export default function AccountPage() {
   const { data: session, status } = useSession();
@@ -12,13 +13,15 @@ export default function AccountPage() {
   const [confirm, setConfirm] = useState('');
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const { t, server, language, setLanguage } = useI18n();
+  const [languageMessage, setLanguageMessage] = useState<{ ok: boolean; text: string } | null>(null);
 
-  if (status === 'loading') return <p>Loading...</p>;
+  if (status === 'loading') return <p>{t('common.loading')}</p>;
   if (!session) {
     return (
       <div className="centered">
-        <p>You must be logged in.</p>
-        <Link href="/login">Go to login</Link>
+        <p>{t('common.mustLogin')}</p>
+        <Link href="/login">{t('common.goToLogin')}</Link>
       </div>
     );
   }
@@ -26,7 +29,7 @@ export default function AccountPage() {
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (next !== confirm) {
-      setMessage({ ok: false, text: 'The new passwords do not match.' });
+      setMessage({ ok: false, text: t('account.mismatch') });
       return;
     }
     setBusy(true);
@@ -41,43 +44,70 @@ export default function AccountPage() {
       setCurrent('');
       setNext('');
       setConfirm('');
-      setMessage({ ok: true, text: 'Password changed.' });
+      setMessage({ ok: true, text: t('account.changed') });
     } else {
-      setMessage({ ok: false, text: await errorMessage(res) });
+      setMessage({ ok: false, text: server(await errorMessage(res)) });
+    }
+  }
+
+  async function changeLanguage(next: Language) {
+    setLanguageMessage(null);
+    try {
+      await setLanguage(next);
+      // the confirmation is shown in the language just chosen
+      setLanguageMessage({ ok: true, text: next === 'pt' ? 'Idioma alterado.' : 'Language changed.' });
+    } catch (err) {
+      setLanguageMessage({ ok: false, text: err instanceof Error ? server(err.message) : t('common.requestFailed') });
     }
   }
 
   const { user } = session;
   return (
     <div>
-      <h1>Account</h1>
+      <h1>{t('account.title')}</h1>
       <dl className="details">
-        <dt>Name</dt>
+        <dt>{t('common.name')}</dt>
         <dd>{user.name ?? '-'}</dd>
-        <dt>E-mail</dt>
+        <dt>{t('common.email')}</dt>
         <dd>{user.email}</dd>
-        <dt>Role</dt>
-        <dd>{user.role === 'ADMIN' ? 'Administrator' : 'User'}</dd>
+        <dt>{t('account.role')}</dt>
+        <dd>{user.role === 'ADMIN' ? t('role.admin') : t('role.user')}</dd>
       </dl>
 
-      <h2>Change password</h2>
+      <h2>{t('account.language')}</h2>
+      <div className="form">
+        <select
+          value={language}
+          onChange={(e) => changeLanguage(e.target.value as Language)}
+          aria-label={t('account.language')}
+        >
+          <option value="pt">Português</option>
+          <option value="en">English</option>
+        </select>
+        <small className="hint">{t('account.languageHint')}</small>
+        {languageMessage && (
+          <p role="status" className={languageMessage.ok ? 'success' : 'error'}>{languageMessage.text}</p>
+        )}
+      </div>
+
+      <h2>{t('account.changePassword')}</h2>
       <form onSubmit={submit} className="form">
         <label>
-          Current password
+          {t('account.current')}
           <input type="password" value={current} onChange={(e) => setCurrent(e.target.value)} autoComplete="current-password" required />
         </label>
         <label>
-          New password <small>(at least 8 characters)</small>
+          {t('account.new')} <small>{t('common.atLeast8')}</small>
           <input type="password" value={next} onChange={(e) => setNext(e.target.value)} autoComplete="new-password" minLength={8} required />
         </label>
         <label>
-          Confirm new password
+          {t('account.confirmNew')}
           <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" minLength={8} required />
         </label>
         {message && (
           <p role="alert" className={message.ok ? 'success' : 'error'}>{message.text}</p>
         )}
-        <button type="submit" disabled={busy}>{busy ? 'Saving...' : 'Change password'}</button>
+        <button type="submit" disabled={busy}>{busy ? t('account.saving') : t('account.changePassword')}</button>
       </form>
     </div>
   );

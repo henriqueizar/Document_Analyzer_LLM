@@ -1,6 +1,7 @@
 'use client';
 
 import { Fragment, useEffect, useRef, useState } from 'react';
+import { useI18n } from '@/lib/i18n';
 
 /** A document passage sent to the model with an answer (stored by the backend). */
 export interface Source {
@@ -81,6 +82,7 @@ export function CitedText({
   onShowPage?: (page: number) => void;
 }) {
   const [active, setActive] = useState<Active | null>(null);
+  const { t } = useI18n();
 
   const parts: React.ReactNode[] = [];
   let last = 0;
@@ -96,7 +98,7 @@ export function CitedText({
         type="button"
         className="cite"
         aria-pressed={isActive}
-        aria-label={`Show the source on page ${page}`}
+        aria-label={t('cite.show', { page })}
         onClick={() => setActive(isActive ? null : { page, claim })}
       >
         {m[0]}
@@ -109,7 +111,7 @@ export function CitedText({
   return (
     <>
       <p className="llm-text">
-        <strong>{label}</strong> {parts}
+        {label && <strong>{label}</strong>} {parts}
       </p>
       {active && (
         <SourcePanel
@@ -138,6 +140,7 @@ function SourcePanel({
   onClose: () => void;
 }) {
   const [all, setAll] = useState(false);
+  const { t } = useI18n();
   // Bring the source into view: otherwise it may open below the screen and
   // look like the click did nothing.
   const panelRef = useRef<HTMLDivElement>(null);
@@ -151,17 +154,17 @@ function SourcePanel({
   const shown = all ? passages : passages.filter((_, i) => i === primary);
 
   return (
-    <div className="source" role="region" aria-label={`Source, page ${page}`} ref={panelRef}>
+    <div className="source" role="region" aria-label={t('cite.source', { page })} ref={panelRef}>
       <div className="source-head">
-        <span>Source: page {page}</span>
+        <span>{t('cite.source', { page })}</span>
         <span className="button-row">
           {onShowPage && (
             <button type="button" onClick={() => onShowPage(page)}>
-              Show page {page} in the PDF
+              {t('cite.showInPdf', { page })}
             </button>
           )}
-          <button type="button" onClick={onClose} aria-label="Close source">
-            Close
+          <button type="button" onClick={onClose} aria-label={t('common.close')}>
+            {t('common.close')}
           </button>
         </span>
       </div>
@@ -169,8 +172,8 @@ function SourcePanel({
         <p>
           <small>
             {sources
-              ? `The model was not given any text from page ${page}: this citation could not be checked.`
-              : 'The source text was not stored for this answer (it was created before sources were saved).'}
+              ? t('cite.notGiven', { page })
+              : t('cite.notStored')}
           </small>
         </p>
       ) : (
@@ -178,10 +181,10 @@ function SourcePanel({
       )}
       {passages.length > 0 && (
         <button type="button" className="link-button" onClick={() => setAll(!all)}>
-          {all ? 'Show only the matching sentence' : `Show all the text the model received from page ${page}`}
+          {all ? t('cite.showMatching') : t('cite.showAll', { page })}
         </button>
       )}
-      <small>This is the exact text the model received from the document.</small>
+      <small>{t('cite.exact')}</small>
     </div>
   );
 }

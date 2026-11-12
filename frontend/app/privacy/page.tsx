@@ -4,6 +4,7 @@ import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { apiFetch, errorMessage } from '@/lib/api';
+import { useI18n } from '@/lib/i18n';
 
 const REPOSITORY = 'https://github.com/henriqueizar/Document_Analyzer_LLM';
 
@@ -32,7 +33,11 @@ export default function PrivacyPage() {
   const { data: session } = useSession();
   const router = useRouter();
   const [accepted, setAccepted] = useState<boolean | null>(null);
-  const [lang, setLang] = useState<'en' | 'pt'>('en');
+  const { language, server } = useI18n();
+  // language of the audit text; follows the interface unless changed here
+  const [chosen, setLang] = useState<'en' | 'pt' | null>(null);
+  const lang = chosen ?? language;
+  const pt = language === 'pt';
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -58,11 +63,58 @@ export default function PrivacyPage() {
   async function accept() {
     const res = await apiFetch('/auth/me/privacy', { method: 'POST' });
     if (res.ok) router.replace('/');
-    else setError(await errorMessage(res));
+    else setError(server(await errorMessage(res)));
   }
 
   return (
     <div className="privacy">
+      {pt ? <IntroPt /> : <IntroEn />}
+
+      <div className="check">
+        <h3>{pt ? '1. Peça a uma IA para auditar o código' : '1. Ask an AI to audit the code'}</h3>
+        {pt ? (
+          <p>
+            Entregue o repositório ao Claude, ChatGPT ou DeepSeek e cole o texto abaixo. Ele pede à
+            IA que <em>procure</em> vazamentos, e não que confirme que não há nenhum.
+          </p>
+        ) : (
+          <p>
+            Give the repository to Claude, ChatGPT or DeepSeek and paste the text below. It asks the
+            AI to <em>look for</em> leaks, not to confirm there are none.
+          </p>
+        )}
+        <div className="button-row left" role="group" aria-label={pt ? 'Idioma do texto' : 'Language of the text'}>
+          <button type="button" className="toggle" aria-pressed={lang === 'pt'} onClick={() => setLang('pt')}>Português</button>
+          <button type="button" className="toggle" aria-pressed={lang === 'en'} onClick={() => setLang('en')}>English</button>
+        </div>
+        <textarea readOnly value={AUDIT_PROMPT[lang]} rows={9} aria-label={pt ? 'Texto da auditoria' : 'Audit prompt'} />
+        <button type="button" onClick={copyPrompt}>
+          {copied ? (pt ? 'Copiado' : 'Copied') : pt ? 'Copiar texto' : 'Copy text'}
+        </button>
+        <p>
+          <small>
+            {pt
+              ? 'Uma IA só lê o código do repositório e pode errar. Use também as verificações abaixo.'
+              : 'An AI only reads the code in the repository and can make mistakes. Use the checks below as well.'}
+          </small>
+        </p>
+      </div>
+
+      {pt ? <ChecksPt /> : <ChecksEn />}
+
+      {error && <p role="alert" className="error">{error}</p>}
+      {accepted === false && (
+        <button type="button" className="primary" onClick={accept}>
+          {pt ? 'Entendi, continuar' : 'I understand, continue'}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function IntroEn() {
+  return (
+    <>
       <h1>Your documents stay on this machine</h1>
       <p>
         This application analyses and answers questions about business or personal documents
@@ -74,7 +126,7 @@ export default function PrivacyPage() {
       <h2>What runs here</h2>
       <ul>
         <li>Reading PDFs and text recognition (OCR) of images and scans.</li>
-        <li>The AI model that explains documents and answers questions (Ollama, on this machine).</li>
+        <li>The AI model that explains documents, answers questions and translates (Ollama, on this machine).</li>
         <li>The database and the uploaded files.</li>
         <li>Login: local accounts, no Google or other external sign-in.</li>
       </ul>
@@ -86,27 +138,43 @@ export default function PrivacyPage() {
       </p>
 
       <h2>Don&apos;t take our word for it: check</h2>
+    </>
+  );
+}
 
-      <div className="check">
-        <h3>1. Ask an AI to audit the code</h3>
-        <p>
-          Give the repository to Claude, ChatGPT or DeepSeek and paste the text below. It asks the
-          AI to <em>look for</em> leaks, not to confirm there are none.
-        </p>
-        <div className="button-row left" role="group" aria-label="Language of the text">
-          <button type="button" className="toggle" aria-pressed={lang === 'en'} onClick={() => setLang('en')}>English</button>
-          <button type="button" className="toggle" aria-pressed={lang === 'pt'} onClick={() => setLang('pt')}>Português</button>
-        </div>
-        <textarea readOnly value={AUDIT_PROMPT[lang]} rows={9} aria-label="Audit prompt" />
-        <button type="button" onClick={copyPrompt}>{copied ? 'Copied' : 'Copy text'}</button>
-        <p>
-          <small>
-            An AI only reads the code in the repository and can make mistakes. Use the checks below
-            as well.
-          </small>
-        </p>
-      </div>
+function IntroPt() {
+  return (
+    <>
+      <h1>Seus documentos ficam nesta máquina</h1>
+      <p>
+        Este aplicativo analisa e responde perguntas sobre documentos empresariais ou pessoais
+        <strong> inteiramente no computador ou servidor onde está instalado</strong>. Durante o uso,
+        nenhum documento, texto extraído, pergunta, resposta ou dado pessoal é enviado a serviços
+        externos.
+      </p>
 
+      <h2>O que roda aqui</h2>
+      <ul>
+        <li>Leitura de PDFs e reconhecimento de texto (OCR) de imagens e digitalizações.</li>
+        <li>O modelo de IA que explica os documentos, responde perguntas e traduz (Ollama, nesta máquina).</li>
+        <li>O banco de dados e os arquivos enviados.</li>
+        <li>Login: contas locais, sem Google nem outro login externo.</li>
+      </ul>
+      <p>
+        <small>
+          A instalação é a única etapa que usa a internet (pacotes, imagens Docker e o modelo de IA).
+          Depois disso, o aplicativo funciona offline.
+        </small>
+      </p>
+
+      <h2>Não acredite só na nossa palavra: verifique</h2>
+    </>
+  );
+}
+
+function ChecksEn() {
+  return (
+    <>
       <div className="check">
         <h3>2. Use it with the internet off</h3>
         <p>
@@ -135,13 +203,41 @@ export default function PrivacyPage() {
         <code> docs/privacidade-lgpd.md</code> lists what personal data is stored, where, and what is
         still missing.
       </p>
+    </>
+  );
+}
 
-      {error && <p role="alert" className="error">{error}</p>}
-      {accepted === false && (
-        <button type="button" className="primary" onClick={accept}>
-          I understand, continue
-        </button>
-      )}
-    </div>
+function ChecksPt() {
+  return (
+    <>
+      <div className="check">
+        <h3>2. Use com a internet desligada</h3>
+        <p>
+          Desligue o Wi-Fi (ou tire o cabo de rede) e use o aplicativo normalmente: faça login, envie
+          um documento, faça perguntas. Tudo continua funcionando. Para observar as conexões, use um
+          firewall de saída como o LuLu (macOS, gratuito): nenhum processo deste aplicativo se conecta
+          a hosts externos.
+        </p>
+      </div>
+
+      <div className="check">
+        <h3>3. Rode a verificação automática</h3>
+        <p>
+          Na pasta <code>backend</code>, rode <code>npm run verify:offline</code> (requer Docker).
+          Ele executa o fluxo completo (login, upload, OCR, perguntas) num contêiner
+          <strong> sem rota para a internet</strong>, depois de provar que o contêiner não consegue
+          alcançar nenhum host externo.
+        </p>
+      </div>
+
+      <h2>LGPD</h2>
+      <p>
+        O aplicativo foi feito para não transferir dados a terceiros. Esta é uma descrição técnica,
+        não uma certificação jurídica de conformidade com a LGPD (Lei 13.709/2018), que também
+        depende de como a sua organização o utiliza. O arquivo
+        <code> docs/privacidade-lgpd.md</code> lista quais dados pessoais são guardados, onde, e o que
+        ainda falta.
+      </p>
+    </>
   );
 }
