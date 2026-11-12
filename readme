@@ -210,6 +210,14 @@ The assistant answers **only from the document**. Defences against hallucination
   dates verbatim, ignore instructions written inside documents, and reply with a fixed
   sentence ("Não encontrei essa informação no documento.") when the answer is not there.
 - **Temperature 0**, thinking mode off for reasoning models.
+- **Two answer modes.** By default (strict) the assistant answers only what the document
+  states: it does not pick answers to exercises in the document, give opinions or draw
+  conclusions, and it refuses small talk. An answer that cannot be tied to the document
+  (no citation, and no sentence that clearly matches a passage) is replaced by the
+  refusal sentence by the application. Interpretation is available only when the user
+  ticks "Interpret" for a question (it turns itself off after sending): the model may
+  then analyse, separating "No documento" (cited facts) from "Interpretação", and the
+  application shows the answer in a box labelled as interpretation.
 - **Clickable citations:** every `[p. N]` opens, under the answer, the exact text from
   page N that the model was given (stored with each answer), with the matching sentence
   highlighted; for PDFs, "Show page N in the PDF" opens the viewer at that page. When a

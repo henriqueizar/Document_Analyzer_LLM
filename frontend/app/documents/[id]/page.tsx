@@ -13,7 +13,12 @@ interface Interaction {
   answer: string;
   /** Passages sent to the model (null for answers created before sources were stored). */
   sources: Source[] | null;
+  /** STRICT: what the document states. INTERPRETATION: the model's reading, asked for explicitly. */
+  mode?: 'STRICT' | 'INTERPRETATION';
 }
+
+/** The refusal sentences the backend uses (pt / en). */
+const REFUSALS = ['Não encontrei essa informação no documento.', 'I could not find this information in the document.'];
 
 type Status = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
 
@@ -69,7 +74,7 @@ function LlmText({
   const at = text.search(/\n*⚠/u);
   const body = at === -1 ? text : text.slice(0, at).trimEnd();
   const warning = at === -1 ? null : text.slice(at).trim();
-  return (
+  const content = (
     <>
       <CitedText label={label} text={body} sources={interaction.sources} onShowPage={onShowPage} />
       {warning && (
@@ -79,6 +84,30 @@ function LlmText({
       )}
     </>
   );
+  if (interaction.mode === 'INTERPRETATION') {
+    // The label comes from the application, not from the model.
+    return (
+      <div className="interpretation" role="note" aria-label="Interpretation">
+        <p className="interpretation-label">
+          [Interpretation] Not stated in the document: this is the model&apos;s reading. Check the cited passages.
+        </p>
+        {content}
+      </div>
+    );
+  }
+  if (interaction.role === 'QUESTION' && REFUSALS.includes(body.trim())) {
+    return (
+      <>
+        {content}
+        <p className="hint-line">
+          <small>
+            Want the model&apos;s interpretation instead? Tick &quot;Interpret&quot; below and ask again.
+          </small>
+        </p>
+      </>
+    );
+  }
+  return content;
 }
 
 /** What is happening with the document right now, and what the user can do. */
@@ -149,7 +178,9 @@ export default function DocumentPage() {
   const [question, setQuestion] = useState('');
   const [asking, setAsking] = useState(false);
   /** Question sent and waiting for its answer, shown in the chat right away. */
-  const [pending, setPending] = useState<string | null>(null);
+  const [pending, setPending] = useState<{ text: string; interpret: boolean } | null>(null);
+  /** Ask for an interpretation: explicit, and off again after each question. */
+  const [interpret, setInterpret] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -209,22 +240,25 @@ export default function DocumentPage() {
     e.preventDefault();
     const text = question.trim();
     if (!text || asking) return;
+    const wantsInterpretation = interpret;
 
     setAsking(true);
     setError(null);
-    setPending(text);
+    setPending({ text, interpret: wantsInterpretation });
     setQuestion('');
+    setInterpret(false);
     try {
       const res = await apiFetch(`/documents/${id}/ask`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question: text }),
+        body: JSON.stringify({ question: text, interpret: wantsInterpretation }),
       });
       if (!res.ok) throw new Error(await errorMessage(res));
       setData(await fetchDocument(id));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Request failed');
       setQuestion(text); // give the question back so it can be sent again
+      setInterpret(wantsInterpretation);
     } finally {
       setPending(null);
       setAsking(false);
@@ -360,9 +394,9 @@ export default function DocumentPage() {
       ))}
       {pending && (
         <div>
-          <p><strong>You:</strong> {pending}</p>
+          <p><strong>You:</strong> {pending.text}</p>
           <p className="llm-text pending">
-            <strong>LLM:</strong> Thinking<LoadingDots />
+            <strong>LLM:</strong> {pending.interpret ? 'Interpreting' : 'Thinking'}<LoadingDots />
           </p>
         </div>
       )}
@@ -370,13 +404,17 @@ export default function DocumentPage() {
       <div ref={chatEndRef} className="chat-end" />
 
       {/* Input, fixed at the bottom of the screen like a messaging app. Enter sends. */}
-      <div className="ask-bar">
+      <div className={`ask-bar${interpret ? ' interpreting' : ''}`}>
         <form onSubmit={askQuestion} className="ask-form">
           <input
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
             placeholder={
-              ready ? 'Ask something about the document...' : 'Available once the document is read'
+              !ready
+                ? 'Available once the document is read'
+                : interpret
+                  ? 'Ask for an interpretation (it will be marked as such)...'
+                  : 'Ask something about the document...'
             }
             disabled={!ready || asking}
           />
@@ -391,6 +429,16 @@ export default function DocumentPage() {
             )}
           </button>
         </form>
+        <label className="interpret-toggle">
+          <input
+            type="checkbox"
+            checked={interpret}
+            onChange={(e) => setInterpret(e.target.checked)}
+            disabled={!ready || asking}
+          />
+          Interpret: let the model analyse beyond what is written (answer marked as interpretation; off
+          again after sending)
+        </label>
         {error && (
           <p role="alert" className="error">Error: {error}</p>
         )}

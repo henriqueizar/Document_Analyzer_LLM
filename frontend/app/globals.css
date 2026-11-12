@@ -488,3 +488,38 @@ button.danger:hover {
 .pending {
   color: var(--muted);
 }
+
+/* Interpretation: explicitly requested, always labelled by the application */
+.interpret-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 0.85em;
+  color: var(--muted);
+  cursor: pointer;
+}
+.interpret-toggle input {
+  margin-top: 4px;
+  accent-color: var(--ink);
+}
+.ask-bar.interpreting .ask-form input {
+  background: var(--ink);
+  color: var(--paper);
+}
+.ask-bar.interpreting .interpret-toggle {
+  color: var(--ink);
+}
+.interpretation {
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  border: 1px dashed var(--ink);
+}
+.interpretation-label {
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  font-size: 0.85em;
+}
+.hint-line {
+  margin-top: -6px;
+}
