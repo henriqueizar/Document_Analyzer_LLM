@@ -197,8 +197,12 @@ textarea {
   flex-direction: column;
   gap: 12px;
   width: 100%;
-  max-width: 420px;
   text-align: left;
+}
+/* Narrow on the centred sign-in screens; full column width elsewhere, aligned with the title */
+.centered .form,
+.centered .hint {
+  max-width: 420px;
 }
 .form label {
   display: flex;
@@ -218,9 +222,6 @@ textarea {
 }
 .centered .form button[type='submit'] {
   align-self: stretch;
-}
-.hint {
-  max-width: 420px;
 }
 .inline-form {
   display: flex;
