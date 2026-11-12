@@ -20,6 +20,7 @@ import { createReadStream } from 'fs';
 
 import { DocumentsService } from './documents.service';
 import { isSupportedUpload } from '../common/supported-files';
+import { normalizeFileName } from '../common/file-names';
 import { AuthGuard, type AuthUser } from '../auth/auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 
@@ -41,8 +42,11 @@ export class DocumentsController {
           cb(null, uniqueSuffix + extname(file.originalname).toLowerCase());
         },
       }),
+      // File names arrive as UTF-8 (multer's default would read them as Latin-1).
+      defParamCharset: 'utf8',
       limits: { fileSize: MAX_UPLOAD_BYTES },
       fileFilter: (_, file, cb) => {
+        file.originalname = normalizeFileName(file.originalname);
         if (isSupportedUpload(file.originalname, file.mimetype)) {
           cb(null, true);
         } else {

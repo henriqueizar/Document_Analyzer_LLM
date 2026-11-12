@@ -4,6 +4,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  OnModuleInit,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -11,6 +12,7 @@ import * as path from 'path';
 import * as fs from 'fs/promises';
 import { LlmService } from '../llm/llm.service';
 import { ProcessingService } from './processing.service';
+import { repairMisdecodedName } from '../common/file-names';
 import { stripPreamble } from '../llm/clean-response';
 
 const MIME_BY_EXTENSION: Record<string, string> = {
@@ -25,7 +27,7 @@ const MIME_BY_EXTENSION: Record<string, string> = {
 };
 
 @Injectable()
-export class DocumentsService {
+export class DocumentsService implements OnModuleInit {
   private readonly logger = new Logger(DocumentsService.name);
 
   constructor(
@@ -33,6 +35,26 @@ export class DocumentsService {
     private llmService: LlmService,
     private processing: ProcessingService,
   ) {}
+
+  /**
+   * Names uploaded before the UTF-8 fix were stored wrongly decoded
+   * ("3Âª EDICÌ§AÌO.pdf"). Repaired once on start; correct names are untouched.
+   */
+  async onModuleInit() {
+    // Mis-decoded Portuguese accents (ª, ç, ã, é, ó, and the combining accents of
+    // macOS file names) all start with one of these Latin-1 characters.
+    const suspects = await this.prisma.document.findMany({
+      where: { OR: ['Â', 'Ã', 'Ì', 'Í'].map((c) => ({ originalName: { contains: c } })) },
+      select: { id: true, originalName: true },
+    });
+    for (const doc of suspects) {
+      const fixed = repairMisdecodedName(doc.originalName);
+      if (fixed) {
+        await this.prisma.document.update({ where: { id: doc.id }, data: { originalName: fixed } });
+        this.logger.log(`Repaired file name: ${fixed}`);
+      }
+    }
+  }
 
   async create(userEmail: string, file: Express.Multer.File) {
     if (!userEmail) {
