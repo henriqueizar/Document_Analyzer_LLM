@@ -157,6 +157,19 @@ describe('LlmService', () => {
       expect(roles).toEqual(['system', 'user', 'assistant', 'user']);
     });
 
+    it('does not send earlier refusals, which only lead the model to refuse again', async () => {
+      fetchMock.mockResolvedValue(ok('Aviso prévio de 60 dias [p. 3].'));
+      await new LlmService().askQuestion(contract, 'Qual o prazo de aviso prévio?', [
+        { question: 'você consegue ver o prazo?', answer: 'Não encontrei essa informação no documento.' },
+        { question: 'O que diz a cláusula 3?', answer: 'O valor mensal é de R$ 12.500,00 [p. 2].' },
+      ]);
+      const contents = sent().messages.map((m: { content: string }) => m.content);
+      expect(contents).not.toContain('Não encontrei essa informação no documento.');
+      expect(contents).toContain('O valor mensal é de R$ 12.500,00 [p. 2].');
+      // the refused question still helps to find passages for follow-ups
+      expect(sent().messages).toHaveLength(1 + 2 + 1);
+    });
+
     it('sends the whole conversation when it is short', async () => {
       fetchMock.mockResolvedValue(ok('Aviso prévio de 60 dias [p. 3].'));
       const history = Array.from({ length: 6 }, (_, i) => ({ question: `pergunta ${i}`, answer: `resposta ${i} [p. 1].` }));

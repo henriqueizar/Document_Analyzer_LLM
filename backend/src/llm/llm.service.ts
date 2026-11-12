@@ -122,7 +122,10 @@ export class LlmService {
     const doc = this.context(document, passages, selection.passages);
     const sources = toSources(selection.passages);
 
-    const raw = await this.chatIn(lang, answerMessages(lang, doc, question, recent, mode), {
+    // Earlier refusals carry no information and lead small models to refuse
+    // again ("Não encontrei..." three times in a row); they are not sent.
+    const conversation = recent.filter((t) => !(isNotFound(t.answer) && !hasCitation(t.answer)));
+    const raw = await this.chatIn(lang, answerMessages(lang, doc, question, conversation, mode), {
       temperature: 0,
       maxTokens: mode === 'INTERPRETATION' ? MAX_TOKENS.interpretation : MAX_TOKENS.answer,
     });

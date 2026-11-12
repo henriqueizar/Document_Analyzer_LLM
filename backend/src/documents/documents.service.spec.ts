@@ -45,7 +45,7 @@ describe('DocumentsService', () => {
   let service: DocumentsService;
   let prisma: ReturnType<typeof makePrisma>;
   let processing: { enqueue: jest.Mock; isQueued: jest.Mock };
-  let llm: { explainDocument: jest.Mock; askQuestion: jest.Mock };
+  let llm: { explainDocument: jest.Mock; askQuestion: jest.Mock; translate: jest.Mock };
 
   async function build(originalName: string, overrides: Record<string, unknown> = {}) {
     prisma = makePrisma(originalName, overrides);

@@ -33,7 +33,7 @@ interface Case {
   /** Pages the answer may cite; every [p. N] must be one of them (wrong pages fail). */
   pages?: number[];
   /** Which sample document the question is about (default: the contract). */
-  doc?: 'contrato' | 'prova';
+  doc?: 'contrato' | 'prova' | 'artigo';
 }
 
 const CITATION = /\[p\.\s*\d+\]/;
@@ -85,6 +85,22 @@ const cases: Case[] = [
     expect: [/Interpreta[çc][ãa]o:/i, CITATION],
     pages: [2],
   },
+
+  // A paper (fictional): reading the header (title, authors, institutions and
+  // e-mails) is reading, not concluding; data that is not there is still refused.
+  { name: 'artigo: título', doc: 'artigo', question: 'Qual o título do documento?', expect: [/Previs[ãa]o de Estoques/i, CITATION], pages: [1] },
+  { name: 'artigo: e-mails dos autores', doc: 'artigo', question: 'Você consegue ver os e-mails dos autores?', expect: [/ana\.ferreira@uee\.exemplo\.br/, /marcos\.lima@itf\.exemplo\.br/, CITATION], pages: [1] },
+  { name: 'artigo: de quem é o e-mail', doc: 'artigo', question: 'O que é marcos.lima@itf.exemplo.br?', expect: [/Marcos/, CITATION], pages: [1] },
+  {
+    name: 'artigo: depois de uma recusa (histórico)',
+    doc: 'artigo',
+    question: 'Qual a instituição da Ana Paula Ferreira?',
+    history: [{ question: 'Qual o telefone dos autores?', answer: 'Não encontrei essa informação no documento.' }],
+    expect: [/Universidade Estadual do Exemplo|UEE/, CITATION],
+    pages: [1],
+  },
+  { name: 'artigo: dado ausente (telefone)', doc: 'artigo', question: 'Qual o telefone dos autores?', refuse: true },
+  { name: 'artigo: julgamento (modo estrito)', doc: 'artigo', question: 'Esse artigo é bom?', refuse: true },
 ];
 
 async function main() {
@@ -93,7 +109,11 @@ async function main() {
     name: file,
     text: await ocr.recognizePdf(join(__dirname, '..', 'test', 'fixtures', file)),
   });
-  const documents = { contrato: await load('contrato-exemplo.pdf'), prova: await load('prova-exemplo.pdf') };
+  const documents = {
+    contrato: await load('contrato-exemplo.pdf'),
+    prova: await load('prova-exemplo.pdf'),
+    artigo: await load('artigo-exemplo.pdf'),
+  };
   const document = documents.contrato;
   const llm = new LlmService();
   console.log(`Model: ${llm.model} | context: ${process.env.LLM_NUM_CTX || 'default (8192)'} tokens\n`);
