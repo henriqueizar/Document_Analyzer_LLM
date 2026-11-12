@@ -1,4 +1,4 @@
-import { LlmService } from './llm.service';
+import { LlmService, sameCitationsAndNumbers } from './llm.service';
 
 const ok = (content: string) =>
   new Response(JSON.stringify({ message: { role: 'assistant', content } }), { status: 200 });
@@ -284,5 +284,43 @@ describe('LlmService', () => {
     );
     const { text } = await new LlmService().explainDocument(contract);
     expect(text).toBe('Contrato de prestação de serviços entre ACME Ltda. e Beta S.A [p. 1]. O valor mensal é de R$ 12.500,00 [p. 2].');
+  });
+
+  describe('reader language and translation', () => {
+    it('explains in the reader language even when the document is in another one', async () => {
+      fetchMock.mockResolvedValue(ok('This is a cleaning services contract between ACME and Beta for R$ 12.500,00 a month [p. 2].'));
+      const { text, language } = await new LlmService().explainDocument(contract, 'en');
+      expect(language).toBe('en');
+      expect(system()).toMatch(/You summarize company documents/);
+      expect(text).toMatch(/^This is a cleaning services contract/);
+    });
+
+    it('answers in the reader language, not the language of the question', async () => {
+      fetchMock.mockResolvedValue(ok('O valor mensal é de R$ 12.500,00 [p. 2].'));
+      const { language } = await new LlmService().askQuestion(contract, 'What is the monthly amount?', [], 'STRICT', 'pt');
+      expect(language).toBe('pt');
+      expect(system()).toMatch(/Use SOMENTE as informações/);
+    });
+
+    it('translates keeping citations and numbers, and retries once when they change', async () => {
+      fetchMock
+        .mockResolvedValueOnce(ok('The monthly amount is R$ 15,000.00 [p. 3].'))
+        .mockResolvedValueOnce(ok('The monthly amount is R$ 12,500.00 [p. 2].'));
+      const result = await new LlmService().translate('O valor mensal é de R$ 12.500,00 [p. 2].', 'en');
+      expect(result).toEqual({ text: 'The monthly amount is R$ 12,500.00 [p. 2].', verified: true });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('marks a translation as unverified when citations or numbers keep changing', async () => {
+      fetchMock.mockImplementation(async () => ok('The monthly amount is R$ 15,000.00.'));
+      const result = await new LlmService().translate('O valor mensal é de R$ 12.500,00 [p. 2].', 'en');
+      expect(result.verified).toBe(false);
+    });
+
+    it('compares citations and numbers regardless of number formatting', () => {
+      expect(sameCitationsAndNumbers('R$ 12.500,00 [p. 2]', 'R$ 12,500.00 [p. 2]')).toBe(true);
+      expect(sameCitationsAndNumbers('60 dias [p. 6]', '60 days [p. 5]')).toBe(false);
+      expect(sameCitationsAndNumbers('60 dias [p. 6]', 'sixty days [p. 6]')).toBe(false);
+    });
   });
 });

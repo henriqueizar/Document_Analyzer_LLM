@@ -50,7 +50,7 @@ describe('AuthGuard', () => {
     const { context, request } = contextWith(`Bearer ${await sign()}`);
     await expect(guard.canActivate(context)).resolves.toBe(true);
     expect(prisma.user.findUnique).toHaveBeenCalledWith({ where: { email: 'alice@example.com' } });
-    expect(request.user).toEqual({ id: 'u1', email: 'alice@example.com', name: 'Alice', role: 'USER' });
+    expect(request.user).toEqual({ id: 'u1', email: 'alice@example.com', name: 'Alice', role: 'USER', language: 'pt' });
   });
 
   it('rejects a valid token whose account no longer exists or has no password', async () => {

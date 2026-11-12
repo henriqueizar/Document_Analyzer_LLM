@@ -99,6 +99,29 @@ export class DocumentsService implements OnModuleInit {
     return this.toPublic(queued);
   }
 
+  /**
+   * Translation of an explanation or answer into `to`, done once by the local
+   * LLM and stored. The original is kept; the translation is shown as such.
+   */
+  async translate(documentId: string, interactionId: string, userEmail: string, to: unknown) {
+    if (to !== 'pt' && to !== 'en') throw new BadRequestException('Language must be "pt" or "en".');
+    await this.findOwned(documentId, userEmail);
+    const interaction = await this.prisma.llmInteraction.findFirst({
+      where: { id: interactionId, documentId },
+    });
+    if (!interaction) throw new NotFoundException('Answer not found');
+
+    const stored = (interaction.translations ?? {}) as Record<string, { text: string; verified: boolean }>;
+    if (stored[to]) return { language: to, ...stored[to] };
+
+    const translation = await this.llmService.translate(stripPreamble(interaction.answer), to);
+    await this.prisma.llmInteraction.update({
+      where: { id: interactionId },
+      data: { translations: { ...stored, [to]: translation } as unknown as Prisma.InputJsonValue },
+    });
+    return { language: to, ...translation };
+  }
+
   /** Writes the automatic explanation again (e.g. after the LLM was unavailable). */
   async explain(documentId: string, userEmail: string) {
     const document = await this.findOwned(documentId, userEmail);
@@ -148,7 +171,13 @@ export class DocumentsService implements OnModuleInit {
     );
   }
 
-  async ask(documentId: string, question: string, userEmail: string, interpret = false) {
+  async ask(
+    documentId: string,
+    question: string,
+    userEmail: string,
+    interpret = false,
+    language: 'pt' | 'en' = 'pt',
+  ) {
     const mode: AnswerMode = interpret ? 'INTERPRETATION' : 'STRICT';
     if (!question?.trim()) {
       throw new BadRequestException('Question must not be empty');
@@ -178,6 +207,7 @@ export class DocumentsService implements OnModuleInit {
       question,
       history,
       mode,
+      language,
     );
 
     return this.prisma.llmInteraction.create({
@@ -188,6 +218,7 @@ export class DocumentsService implements OnModuleInit {
         answer: answer.text,
         sources: answer.sources as unknown as Prisma.InputJsonValue,
         mode,
+        language: answer.language ?? language,
       },
     });
   }

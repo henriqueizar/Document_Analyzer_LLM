@@ -34,6 +34,8 @@ function makePrisma(originalName: string, overrides: Record<string, unknown> = {
       deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
       create: jest.fn().mockResolvedValue({}),
       findMany: jest.fn().mockResolvedValue([]),
+      findFirst: jest.fn().mockResolvedValue(null),
+      update: jest.fn().mockImplementation(({ data }) => Promise.resolve(data)),
     },
     user: {},
   };
@@ -51,6 +53,7 @@ describe('DocumentsService', () => {
     llm = {
       explainDocument: jest.fn().mockResolvedValue({ text: 'explanation', sources: [{ page: 1, text: 'src' }] }),
       askQuestion: jest.fn().mockResolvedValue({ text: 'answer', sources: [{ page: 1, text: 'src' }] }),
+      translate: jest.fn().mockResolvedValue({ text: 'translated [p. 1]', verified: true }),
     };
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -95,6 +98,7 @@ describe('DocumentsService', () => {
         'What is the total?',
         [],
         'STRICT',
+        'pt',
       );
       expect(prisma.llmInteraction.create).toHaveBeenCalled();
     });
@@ -198,6 +202,7 @@ describe('DocumentsService', () => {
         { question: 'q2', answer: 'a2 [p. 1]' },
       ],
       'STRICT',
+      'pt',
     );
   });
 
@@ -236,7 +241,7 @@ describe('DocumentsService', () => {
     it('stores interpretation answers as such when explicitly requested', async () => {
       await build('a.png', { status: 'COMPLETED', extractedText: 'text' });
       await service.ask('doc-1', 'Quais os riscos?', OWNER, true);
-      expect(llm.askQuestion).toHaveBeenCalledWith(expect.anything(), 'Quais os riscos?', [], 'INTERPRETATION');
+      expect(llm.askQuestion).toHaveBeenCalledWith(expect.anything(), 'Quais os riscos?', [], 'INTERPRETATION', 'pt');
       expect(prisma.llmInteraction.create).toHaveBeenCalledWith({ data: expect.objectContaining({ mode: 'INTERPRETATION' }) });
     });
 
@@ -249,7 +254,42 @@ describe('DocumentsService', () => {
         'q2',
         [{ question: 'q1', answer: '[interpretation] parece arriscado' }],
         'STRICT',
+        'pt',
       );
+    });
+  });
+
+  describe('languages', () => {
+    it('answers in the language of whoever asks, and stores it', async () => {
+      await build('a.png', { status: 'COMPLETED', extractedText: 'text' });
+      await service.ask('doc-1', 'What is the total?', OWNER, false, 'en');
+      expect(llm.askQuestion).toHaveBeenCalledWith(expect.anything(), 'What is the total?', [], 'STRICT', 'en');
+      expect(prisma.llmInteraction.create).toHaveBeenCalledWith({ data: expect.objectContaining({ language: 'en' }) });
+    });
+
+    it('translates an answer once and then serves the stored translation', async () => {
+      await build('a.png', { status: 'COMPLETED', extractedText: 'text' });
+      const interaction = { id: 'i1', documentId: 'doc-1', answer: 'Resposta [p. 1].', translations: null };
+      prisma.llmInteraction.findFirst.mockResolvedValue(interaction);
+      await expect(service.translate('doc-1', 'i1', OWNER, 'en')).resolves.toEqual({
+        language: 'en',
+        text: 'translated [p. 1]',
+        verified: true,
+      });
+      expect(prisma.llmInteraction.update).toHaveBeenCalledWith({
+        where: { id: 'i1' },
+        data: { translations: { en: { text: 'translated [p. 1]', verified: true } } },
+      });
+      prisma.llmInteraction.findFirst.mockResolvedValue({ ...interaction, translations: { en: { text: 'stored', verified: true } } });
+      await expect(service.translate('doc-1', 'i1', OWNER, 'en')).resolves.toMatchObject({ text: 'stored' });
+      expect(llm.translate).toHaveBeenCalledTimes(1);
+    });
+
+    it("refuses other languages and other users' documents", async () => {
+      await build('a.png', { status: 'COMPLETED', extractedText: 'text' });
+      await expect(service.translate('doc-1', 'i1', OWNER, 'fr')).rejects.toBeInstanceOf(BadRequestException);
+      prisma.document.findFirst.mockResolvedValue(null);
+      await expect(service.translate('doc-1', 'i1', 'mallory@example.com', 'en')).rejects.toBeInstanceOf(NotFoundException);
     });
   });
 });

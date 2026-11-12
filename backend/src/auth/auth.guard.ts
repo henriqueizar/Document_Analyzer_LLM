@@ -16,6 +16,7 @@ export interface AuthUser {
   email: string;
   name: string | null;
   role: Role;
+  language: 'pt' | 'en';
 }
 
 export type AuthenticatedRequest = Request & { user: AuthUser };
@@ -54,7 +55,13 @@ export class AuthGuard implements CanActivate {
     if (!user || !user.passwordHash) {
       throw new UnauthorizedException('Account not found or not active');
     }
-    request.user = { id: user.id, email: user.email, name: user.name, role: user.role };
+    request.user = {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      language: user.language === 'en' ? 'en' : 'pt',
+    };
     return true;
   }
 }

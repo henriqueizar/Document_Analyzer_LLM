@@ -91,8 +91,8 @@ export class DocumentsController {
     @Body('interpret') interpret: unknown,
     @CurrentUser() user: AuthUser,
   ) {
-    // interpretation only when explicitly requested
-    return this.documentsService.ask(id, question, user.email, interpret === true);
+    // interpretation only when explicitly requested; answers in the user's language
+    return this.documentsService.ask(id, question, user.email, interpret === true, user.language);
   }
 
   /** Authenticated replacement for the old public /uploads static route. */
@@ -103,6 +103,18 @@ export class DocumentsController {
       type: mimeType,
       disposition: 'inline',
     });
+  }
+
+  /** Translation of an explanation or answer into the given language (stored). */
+  @Post(':id/interactions/:interactionId/translate')
+  @HttpCode(200)
+  translate(
+    @Param('id') id: string,
+    @Param('interactionId') interactionId: string,
+    @Body('to') to: unknown,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.documentsService.translate(id, interactionId, user.email, to);
   }
 
   /** Permanently deletes the document, its file and all its interactions. */

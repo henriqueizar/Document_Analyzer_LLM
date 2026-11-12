@@ -36,6 +36,7 @@ const llmStub = {
     text: `EXPLANATION OF: ${doc.text.slice(0, 40)} [p. 1]`,
     sources: [{ page: 1, text: doc.text.slice(0, 200) }],
   })),
+  translate: jest.fn(async (text: string, to: string) => ({ text: `[${to}] ${text}`, verified: true })),
   askQuestion: jest.fn(async (_doc: unknown, question: string) => ({
     text: `ANSWER TO: ${question}`,
     sources: [{ page: 3, text: 'PAGE 3 DUE DATE DECEMBER' }],
@@ -123,7 +124,7 @@ describe('Documents API (e2e)', () => {
       .send({ question: 'Is the due date reasonable?', interpret: true })
       .expect(201);
     expect(interpreted.body.mode).toBe('INTERPRETATION');
-    expect(llmStub.askQuestion).toHaveBeenLastCalledWith(expect.anything(), 'Is the due date reasonable?', expect.any(Array), 'INTERPRETATION');
+    expect(llmStub.askQuestion).toHaveBeenLastCalledWith(expect.anything(), 'Is the due date reasonable?', expect.any(Array), 'INTERPRETATION', 'pt');
     // anything but a literal true is a normal (strict) question
     const strict = await http()
       .post(`/documents/${id}/ask`)
@@ -218,6 +219,46 @@ describe('Documents API (e2e)', () => {
     it('rejects tokens of accounts that do not exist', async () => {
       const ghost = `Bearer ${await tokenFor(`ghost-${runId}@example.com`)}`;
       await http().get('/documents').set('Authorization', ghost).expect(401);
+    });
+  });
+
+  describe('languages', () => {
+    it('changes the user language, answers in it and translates on demand (stored)', async () => {
+      await http().post('/auth/me/language').set('Authorization', alice).send({ language: 'fr' }).expect(400);
+      const me = await http().post('/auth/me/language').set('Authorization', alice).send({ language: 'en' }).expect(200);
+      expect(me.body.language).toBe('en');
+
+      const { body } = await http()
+        .post('/documents/upload')
+        .set('Authorization', alice)
+        .attach('file', fixture('receipt.png'))
+        .expect(201);
+      await processed();
+      const ask = await http().post(`/documents/${body.id}/ask`).set('Authorization', alice).send({ question: 'total?' }).expect(201);
+      expect(llmStub.askQuestion).toHaveBeenLastCalledWith(expect.anything(), 'total?', [], 'STRICT', 'en');
+      expect(ask.body.language).toBe('en');
+
+      const translated = await http()
+        .post(`/documents/${body.id}/interactions/${ask.body.id}/translate`)
+        .set('Authorization', alice)
+        .send({ to: 'pt' })
+        .expect(200);
+      expect(translated.body).toEqual({ language: 'pt', text: '[pt] ANSWER TO: total?', verified: true });
+      await http()
+        .post(`/documents/${body.id}/interactions/${ask.body.id}/translate`)
+        .set('Authorization', mallory)
+        .send({ to: 'pt' })
+        .expect(404);
+      const doc = await http().get(`/documents/${body.id}`).set('Authorization', alice).expect(200);
+      const stored = doc.body.interactions.find((i: { id: string }) => i.id === ask.body.id);
+      expect(stored.translations.pt.text).toBe('[pt] ANSWER TO: total?');
+
+      await http().post('/auth/me/language').set('Authorization', alice).send({ language: 'pt' }).expect(200);
+    });
+
+    it('tells the sign-in screens which language to use', async () => {
+      const { body } = await http().get('/auth/setup').expect(200);
+      expect(['pt', 'en']).toContain(body.defaultLanguage);
     });
   });
 
