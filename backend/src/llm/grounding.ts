@@ -42,6 +42,41 @@ export function isNegativeOnly(answer: string): boolean {
   return sentences.length > 0 && sentences.every((x) => NEGATIVE.some((re) => re.test(x)));
 }
 
+/**
+ * Phrasings that pick an answer or judge something. In strict mode these may
+ * only repeat the document: if the document itself does not say it (an answer
+ * key, a recommendation), the claim is the model's own and is not shown.
+ * Pattern-based: it catches the common phrasings, not every possible one.
+ */
+const JUDGEMENT: RegExp[] = [
+  // choosing among options: "a alternativa correta", "resposta certa", "the correct answer"
+  /\b(?:resposta|alternativa|opcao|assertiva|afirmativa)s?\s+(?:correta|certa|verdadeira|incorreta|errada|falsa)s?\b/,
+  /\ba?\s*resposta\s+(?:da|a|para\s+a)\s+questao\s*\d+/,
+  /\bgabarito\b/,
+  /\b(?:correct|right|true|wrong|false)\s+(?:answer|option|alternative|choice|statement)s?\b/,
+  /\bthe\s+answer\s+(?:to|for|of)\s+question\s*\d+/,
+  /\banswer\s+key\b/,
+  // assessments and advice
+  /\b(?:e|seria|parece|sao|sera)\s+(?:mais\s+|muito\s+|bastante\s+)?(?:vantajos|desvantajos|recomendave|adequad|inadequad|razoave|justo|injusto|abusiv|arriscad|favorave|desfavorave|bom\b|boa\b|ruim\b)/,
+  /\b(?:recomendo|recomenda-se|sugiro|sugere-se|o\s+ideal\s+e|a\s+melhor\s+opcao|voce\s+deveria|deveria|vale\s+a\s+pena)\b/,
+  /\b(?:is|seems|would\s+be|are)\s+(?:more\s+|very\s+)?(?:advantageous|disadvantageous|reasonable|fair|unfair|abusive|risky|recommended|appropriate|favourable|favorable|good|bad)\b/,
+  /\b(?:i\s+recommend|i\s+suggest|you\s+should|the\s+best\s+option|it\s+is\s+worth)\b/,
+];
+
+/**
+ * Returns the judgement phrase an answer contains that the document itself
+ * does not contain, or null. Accents and case are ignored.
+ */
+export function unsupportedJudgement(answer: string, sourceText: string): string | null {
+  const a = normalize(answer.replace(CITATION, ''));
+  const source = normalize(sourceText);
+  for (const re of JUDGEMENT) {
+    const m = a.match(re);
+    if (m && !source.includes(m[0].trim())) return m[0].trim();
+  }
+  return null;
+}
+
 export function isNotFound(answer: string): boolean {
   const a = normalize(answer);
   return Object.values(NOT_FOUND).some((phrase) =>

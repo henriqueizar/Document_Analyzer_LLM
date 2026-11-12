@@ -102,6 +102,21 @@ describe('LlmService', () => {
       expect(text).toBe('Não encontrei essa informação no documento.');
     });
 
+    it.each([
+      ['picking an option of an exercise', 'Qual a resposta da questão 3?', 'A resposta da questão 3 é: "B. aviso prévio de 60 dias" [p. 3].'],
+      ['judging the contract', 'Esse prazo é bom?', 'O prazo de 60 dias é razoável [p. 3].'],
+    ])('strict mode: replaces a judgement the document does not make (%s), even when cited', async (_, q, judged) => {
+      fetchMock.mockResolvedValue(ok(judged));
+      const { text } = await new LlmService().askQuestion(contract, q);
+      expect(text).toBe('Não encontrei essa informação no documento.');
+    });
+
+    it('interpretation mode keeps judgements (they are labelled by the app)', async () => {
+      fetchMock.mockResolvedValue(ok('No documento: aviso prévio de 60 dias [p. 3].\n\nInterpretação: o prazo é razoável.'));
+      const { text } = await new LlmService().askQuestion(contract, 'Esse prazo é bom?', [], 'INTERPRETATION');
+      expect(text).toMatch(/o prazo é razoável/);
+    });
+
     it('strict mode: tells the model not to pick exercise answers, judge or chat', async () => {
       fetchMock.mockResolvedValue(ok('x [p. 1].'));
       await new LlmService().askQuestion(contract, 'Qual a resposta correta da questão 24?');

@@ -394,8 +394,9 @@ textarea {
   font-size: 0.85em;
 }
 
-/* Clickable citations: [p. N] */
+/* Clickable citations: [p. N] (kept selectable so copied answers keep their pages) */
 button.cite {
+  user-select: text;
   display: inline;
   padding: 0 2px;
   border: 0;

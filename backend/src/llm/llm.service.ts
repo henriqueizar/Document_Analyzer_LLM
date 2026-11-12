@@ -12,7 +12,14 @@ import {
   partialExplanationNote,
   Turn,
 } from './prompts';
-import { checkGrounding, groundingWarning, hasCitation, isNegativeOnly, isNotFound } from './grounding';
+import {
+  checkGrounding,
+  groundingWarning,
+  hasCitation,
+  isNegativeOnly,
+  isNotFound,
+  unsupportedJudgement,
+} from './grounding';
 import { attributeCitations, Source } from './citations';
 
 export { DEFAULT_LLM_MODEL } from './ollama.client';
@@ -130,6 +137,13 @@ export class LlmService {
     const cited = attributeCitations(answer, sources);
     if (mode === 'STRICT' && !hasCitation(cited)) {
       this.logger.warn(`Answer not tied to the document, replaced by the refusal: ${JSON.stringify(answer.slice(0, 120))}`);
+      return { text: NOT_FOUND[lang], sources };
+    }
+    // Picking an exercise's answer or judging is the model's own conclusion even
+    // when the quoted option is in the document: strict mode does not show it.
+    const judgement = mode === 'STRICT' ? unsupportedJudgement(cited, doc.excerpts) : null;
+    if (judgement) {
+      this.logger.warn(`Judgement not stated in the document ("${judgement}"), replaced by the refusal`);
       return { text: NOT_FOUND[lang], sources };
     }
 

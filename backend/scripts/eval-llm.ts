@@ -32,6 +32,8 @@ interface Case {
   interpret?: boolean;
   /** Pages the answer may cite; every [p. N] must be one of them (wrong pages fail). */
   pages?: number[];
+  /** Which sample document the question is about (default: the contract). */
+  doc?: 'contrato' | 'prova';
 }
 
 const CITATION = /\[p\.\s*\d+\]/;
@@ -70,13 +72,30 @@ const cases: Case[] = [
     interpret: true,
     expect: [/No documento:/i, /Interpreta[çc][ãa]o:/i, /60/, CITATION],
   },
+  // A document that contains questions and options but no answer key (an
+  // internal training quiz): transcribing is fine, choosing an answer is not.
+  { name: 'prova: enunciado', doc: 'prova', question: 'Qual é o enunciado da questão 2?', expect: [/tr[êe]s per[íi]odos/i, CITATION], pages: [1] },
+  { name: 'prova: escolher a resposta', doc: 'prova', question: 'Qual a resposta da questão 2?', refuse: true },
+  { name: 'prova: alternativa correta', doc: 'prova', question: 'Qual alternativa está correta na questão 3?', refuse: true },
+  {
+    name: 'prova: interpretação (modo explícito)',
+    doc: 'prova',
+    question: 'Qual alternativa responde a questão 3?',
+    interpret: true,
+    expect: [/Interpreta[çc][ãa]o:/i, CITATION],
+    pages: [2],
+  },
 ];
 
 async function main() {
-  const fixture = join(__dirname, '..', 'test', 'fixtures', 'contrato-exemplo.pdf');
-  const text = await new OcrService().recognizePdf(fixture);
+  const ocr = new OcrService();
+  const load = async (file: string) => ({
+    name: file,
+    text: await ocr.recognizePdf(join(__dirname, '..', 'test', 'fixtures', file)),
+  });
+  const documents = { contrato: await load('contrato-exemplo.pdf'), prova: await load('prova-exemplo.pdf') };
+  const document = documents.contrato;
   const llm = new LlmService();
-  const document = { name: 'contrato-exemplo.pdf', text };
   console.log(`Model: ${llm.model} | context: ${process.env.LLM_NUM_CTX || 'default (8192)'} tokens\n`);
 
   let failures = 0;
@@ -91,7 +110,7 @@ async function main() {
   for (const c of cases) {
     const t0 = Date.now();
     const answer = (
-      await llm.askQuestion(document, c.question, c.history ?? [], c.interpret ? 'INTERPRETATION' : 'STRICT')
+      await llm.askQuestion(documents[c.doc ?? 'contrato'], c.question, c.history ?? [], c.interpret ? 'INTERPRETATION' : 'STRICT')
     ).text;
     const problems: string[] = [];
     if (c.refuse) {
