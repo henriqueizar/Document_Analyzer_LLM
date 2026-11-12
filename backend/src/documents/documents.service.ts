@@ -105,9 +105,9 @@ export class DocumentsService implements OnModuleInit {
    */
   async translate(documentId: string, interactionId: string, userEmail: string, to: unknown) {
     if (to !== 'pt' && to !== 'en') throw new BadRequestException('Language must be "pt" or "en".');
-    await this.findOwned(documentId, userEmail);
+    await this.findAccessible(documentId, userEmail);
     const interaction = await this.prisma.llmInteraction.findFirst({
-      where: { id: interactionId, documentId },
+      where: { id: interactionId, documentId, ...visibleTo(userEmail) },
     });
     if (!interaction) throw new NotFoundException('Answer not found');
 
@@ -177,12 +177,13 @@ export class DocumentsService implements OnModuleInit {
     userEmail: string,
     interpret = false,
     language: 'pt' | 'en' = 'pt',
+    userId?: string,
   ) {
     const mode: AnswerMode = interpret ? 'INTERPRETATION' : 'STRICT';
     if (!question?.trim()) {
       throw new BadRequestException('Question must not be empty');
     }
-    const document = await this.findOwned(documentId, userEmail);
+    const document = await this.findAccessible(documentId, userEmail);
     if (document.status !== 'COMPLETED' || !document.extractedText) {
       throw new ConflictException(
         `Document is not ready for questions (status: ${document.status})`,
@@ -190,7 +191,8 @@ export class DocumentsService implements OnModuleInit {
     }
 
     const previous = await this.prisma.llmInteraction.findMany({
-      where: { documentId: document.id, role: 'QUESTION' },
+      // each person's own conversation, also on shared documents
+      where: { documentId: document.id, role: 'QUESTION', user: { email: userEmail } },
       orderBy: { createdAt: 'desc' },
       // the LLM keeps as many of these as fit in its history budget
       take: 50,
@@ -213,6 +215,7 @@ export class DocumentsService implements OnModuleInit {
     return this.prisma.llmInteraction.create({
       data: {
         documentId: document.id,
+        userId: userId ?? document.userId,
         role: 'QUESTION',
         question,
         answer: answer.text,
@@ -224,22 +227,28 @@ export class DocumentsService implements OnModuleInit {
   }
 
   async findOne(documentId: string, userEmail: string) {
-    const document = await this.findOwned(documentId, userEmail);
+    const document = await this.findAccessible(documentId, userEmail);
 
     const interactions = await this.prisma.llmInteraction.findMany({
-      where: { documentId },
+      // the shared explanation, and only the caller's own questions
+      where: { documentId, ...visibleTo(userEmail) },
       orderBy: { createdAt: 'asc' },
     });
 
+    const { owner: documentOwner, ...rest } = document;
     return {
-      document: this.toPublic(document),
+      document: this.toPublic(rest),
+      access: {
+        owner: documentOwner?.email === userEmail,
+        ownerName: documentOwner?.name ?? documentOwner?.email ?? null,
+      },
       // also cleans explanations stored before filler removal existed
       interactions: interactions.map((i) => ({ ...i, answer: stripPreamble(i.answer) })),
     };
   }
 
   async getFile(documentId: string, userEmail: string) {
-    const document = await this.findOwned(documentId, userEmail);
+    const document = await this.findAccessible(documentId, userEmail);
     const extension = path.extname(document.originalName).toLowerCase();
     return {
       path: path.resolve(document.filePath),
@@ -260,8 +269,95 @@ export class DocumentsService implements OnModuleInit {
         status: true,
         explanationStatus: true,
         createdAt: true,
+        shares: { select: { team: { select: { name: true } } } },
       },
     });
+  }
+
+  /** Documents other people shared with teams the caller belongs to. */
+  async findSharedWith(userEmail: string) {
+    const inMyTeams = { team: { members: { some: { user: { email: userEmail } } } } };
+    return this.prisma.document.findMany({
+      where: { user: { email: { not: userEmail } }, shares: { some: inMyTeams } },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        originalName: true,
+        status: true,
+        explanationStatus: true,
+        createdAt: true,
+        user: { select: { name: true, email: true } },
+        // only the caller's own teams: other teams' names are not revealed
+        shares: { where: inMyTeams, select: { team: { select: { name: true } } } },
+      },
+    });
+  }
+
+  /** The owner's view of the sharing: teams it is shared with and the owner's teams. */
+  async shares(documentId: string, userEmail: string) {
+    const document = await this.findOwned(documentId, userEmail);
+    const [shared, mine] = await Promise.all([
+      this.prisma.documentShare.findMany({
+        where: { documentId },
+        select: { team: { select: { id: true, name: true } } },
+      }),
+      this.myTeams(document.userId),
+    ]);
+    return { sharedWith: shared.map((s) => s.team), teams: mine };
+  }
+
+  /**
+   * Sets the teams the document is shared with (an empty list makes it private
+   * again). Only the owner, and only with teams the owner belongs to.
+   */
+  async setShares(documentId: string, userEmail: string, teamIds: unknown) {
+    const document = await this.findOwned(documentId, userEmail);
+    if (!Array.isArray(teamIds) || teamIds.some((t) => typeof t !== 'string')) {
+      throw new BadRequestException('teamIds must be a list of team ids.');
+    }
+    const allowed = new Set((await this.myTeams(document.userId)).map((t) => t.id));
+    const wanted = [...new Set(teamIds as string[])];
+    if (wanted.some((id) => !allowed.has(id))) {
+      throw new BadRequestException('You can only share with teams you belong to.');
+    }
+    await this.prisma.$transaction([
+      this.prisma.documentShare.deleteMany({ where: { documentId } }),
+      this.prisma.documentShare.createMany({ data: wanted.map((teamId) => ({ documentId, teamId })) }),
+    ]);
+    return this.shares(documentId, userEmail);
+  }
+
+  private myTeams(userId: string) {
+    return this.prisma.team.findMany({
+      where: { members: { some: { userId } } },
+      orderBy: { name: 'asc' },
+      select: { id: true, name: true },
+    });
+  }
+
+  /**
+   * A document the caller owns, or one shared with a team the caller belongs
+   * to. Anything else yields the same 404 as a missing document.
+   */
+  private async findAccessible(documentId: string, userEmail: string) {
+    if (!userEmail) {
+      throw new BadRequestException('Missing user identity.');
+    }
+    const document = await this.prisma.document.findFirst({
+      where: {
+        id: documentId,
+        OR: [
+          { user: { email: userEmail } },
+          { shares: { some: { team: { members: { some: { user: { email: userEmail } } } } } } },
+        ],
+      },
+      include: { user: { select: { name: true, email: true } } },
+    });
+    if (!document) {
+      throw new NotFoundException('Document not found');
+    }
+    const { user: owner, ...rest } = document;
+    return { ...rest, owner };
   }
 
   /**
@@ -287,4 +383,9 @@ export class DocumentsService implements OnModuleInit {
     const { filePath: _filePath, filename: _filename, ...rest } = document;
     return rest;
   }
+}
+
+/** Interactions a person may see: the shared explanation and their own questions. */
+function visibleTo(userEmail: string) {
+  return { OR: [{ role: 'EXPLANATION' }, { user: { email: userEmail } }] };
 }

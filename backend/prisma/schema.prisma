@@ -32,7 +32,44 @@ model User {
   /// for this user: "pt" or "en". Defaults to the installation's language.
   language     String     @default("pt")
   documents    Document[]
+  teams        TeamMember[]
+  questions    LlmInteraction[]
   createdAt    DateTime   @default(now())
+}
+
+/// A group of people (usually a department) that documents can be shared with.
+/// Created and managed by administrators; unused installations have none.
+model Team {
+  id        String          @id @default(uuid())
+  name      String          @unique
+  members   TeamMember[]
+  shares    DocumentShare[]
+  createdAt DateTime        @default(now())
+}
+
+model TeamMember {
+  teamId    String
+  team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([teamId, userId])
+  @@index([userId])
+}
+
+/// A document made visible to the members of a team by its owner. Members see
+/// the file and the explanation and ask in their own chat; only the owner can
+/// reprocess, delete or change the sharing.
+model DocumentShare {
+  documentId String
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  teamId     String
+  team       Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+
+  @@id([documentId, teamId])
+  @@index([teamId])
 }
 
 enum DocumentStatus {
@@ -60,6 +97,7 @@ model Document {
   explanationStatus DocumentStatus?
   explanationError  String?
   interactions  LlmInteraction[]
+  shares        DocumentShare[]
   createdAt     DateTime         @default(now())
 }
 
@@ -67,6 +105,10 @@ model LlmInteraction {
   id         String   @id @default(uuid())
   documentId String
   document   Document @relation(fields: [documentId], references: [id])
+  /// Who asked (QUESTION). Each person sees only their own questions, also on
+  /// shared documents. Null for the explanation, which is shared.
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id])
   question   String
   answer     String
   role       String
@@ -82,4 +124,6 @@ model LlmInteraction {
   /// answer is never replaced.
   translations Json?
   createdAt  DateTime @default(now())
+
+  @@index([documentId, userId])
 }

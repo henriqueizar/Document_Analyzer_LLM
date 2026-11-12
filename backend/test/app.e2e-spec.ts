@@ -262,6 +262,121 @@ describe('Documents API (e2e)', () => {
     });
   });
 
+  describe('teams and sharing', () => {
+    const ADMIN = `admin-${runId}@example.com`;
+    const BRUNA = `bruna-${runId}@example.com`;
+    const CARLOS = `carlos-${runId}@example.com`;
+    let admin: string;
+    let bruna: string;
+    let carlos: string;
+    let ids: Record<string, string>;
+    let legal: string;
+    let hr: string;
+    let doc: string;
+
+    beforeAll(async () => {
+      const prisma = app.get(PrismaService);
+      const passwordHash = await hashPassword('e2e-password');
+      ids = {};
+      for (const [email, role] of [[ADMIN, 'ADMIN'], [BRUNA, 'USER'], [CARLOS, 'USER']] as const) {
+        ids[email] = (await prisma.user.create({ data: { email, name: email.split('@')[0], passwordHash, role } })).id;
+      }
+      ids[ALICE] = (await prisma.user.findUniqueOrThrow({ where: { email: ALICE } })).id;
+      admin = `Bearer ${await tokenFor(ADMIN)}`;
+      bruna = `Bearer ${await tokenFor(BRUNA)}`;
+      carlos = `Bearer ${await tokenFor(CARLOS)}`;
+    });
+
+    it('only administrators manage teams; anyone can see their own teams', async () => {
+      await http().get('/teams').set('Authorization', alice).expect(403);
+      await http().post('/teams').set('Authorization', alice).send({ name: 'x' }).expect(403);
+      // nobody is in a team yet: the app shows nothing about sharing
+      expect((await http().get('/teams/mine').set('Authorization', alice).expect(200)).body).toEqual([]);
+
+      legal = (await http().post('/teams').set('Authorization', admin).send({ name: `Jurídico ${runId}` }).expect(201)).body.id;
+      hr = (await http().post('/teams').set('Authorization', admin).send({ name: `RH ${runId}` }).expect(201)).body.id;
+      await http().post('/teams').set('Authorization', admin).send({ name: `RH ${runId}` }).expect(409);
+      await http().post('/teams').set('Authorization', admin).send({ name: '  ' }).expect(400);
+
+      for (const email of [ALICE, BRUNA]) {
+        await http().post(`/teams/${legal}/members`).set('Authorization', admin).send({ userId: ids[email] }).expect(204);
+      }
+      await http().post(`/teams/${hr}/members`).set('Authorization', admin).send({ userId: ids[CARLOS] }).expect(204);
+      expect((await http().get('/teams/mine').set('Authorization', alice).expect(200)).body).toEqual([
+        { id: legal, name: `Jurídico ${runId}` },
+      ]);
+      const list = (await http().get('/teams').set('Authorization', admin).expect(200)).body;
+      const legalTeam = list.find((t: { id: string }) => t.id === legal);
+      expect(legalTeam.members.map((m: { email: string }) => m.email).sort()).toEqual([ALICE, BRUNA].sort());
+    });
+
+    it('a document stays private until its owner shares it with a team they belong to', async () => {
+      doc = (await http().post('/documents/upload').set('Authorization', alice).attach('file', fixture('doc-a.pdf')).expect(201)).body.id;
+      await processed();
+      await http().get(`/documents/${doc}`).set('Authorization', bruna).expect(404);
+
+      // not the owner, or a team the owner is not in
+      await http().put(`/documents/${doc}/shares`).set('Authorization', bruna).send({ teamIds: [legal] }).expect(404);
+      await http().put(`/documents/${doc}/shares`).set('Authorization', alice).send({ teamIds: [hr] }).expect(400);
+
+      const shared = await http().put(`/documents/${doc}/shares`).set('Authorization', alice).send({ teamIds: [legal] }).expect(200);
+      expect(shared.body.sharedWith).toEqual([{ id: legal, name: `Jurídico ${runId}` }]);
+    });
+
+    it('team members see the file and the explanation, and each has their own chat', async () => {
+      await http().post(`/documents/${doc}/ask`).set('Authorization', alice).send({ question: 'alice private question' }).expect(201);
+      await http().post(`/documents/${doc}/ask`).set('Authorization', bruna).send({ question: 'bruna question' }).expect(201);
+
+      const seenByBruna = (await http().get(`/documents/${doc}`).set('Authorization', bruna).expect(200)).body;
+      expect(seenByBruna.access).toEqual({ owner: false, ownerName: ALICE.split('@')[0] });
+      expect(seenByBruna.interactions.map((i: { role: string; question: string }) => i.role === 'EXPLANATION' ? 'EXPLANATION' : i.question)).toEqual([
+        'EXPLANATION',
+        'bruna question',
+      ]);
+      const seenByAlice = (await http().get(`/documents/${doc}`).set('Authorization', alice).expect(200)).body;
+      expect(seenByAlice.access.owner).toBe(true);
+      expect(seenByAlice.interactions.map((i: { question: string }) => i.question)).not.toContain('bruna question');
+
+      await http().get(`/documents/${doc}/file`).set('Authorization', bruna).expect(200);
+      const sharedList = (await http().get('/documents/shared').set('Authorization', bruna).expect(200)).body;
+      expect(sharedList.map((d: { id: string }) => d.id)).toContain(doc);
+      expect(sharedList.find((d: { id: string }) => d.id === doc).user.email).toBe(ALICE);
+
+      // translations: the explanation yes; someone else's answer no
+      const aliceAnswer = seenByAlice.interactions.find((i: { question: string }) => i.question === 'alice private question');
+      await http().post(`/documents/${doc}/interactions/${aliceAnswer.id}/translate`).set('Authorization', bruna).send({ to: 'en' }).expect(404);
+      const explanation = seenByBruna.interactions[0];
+      await http().post(`/documents/${doc}/interactions/${explanation.id}/translate`).set('Authorization', bruna).send({ to: 'en' }).expect(200);
+    });
+
+    it('only the owner reprocesses, deletes or changes the sharing; other teams see nothing', async () => {
+      await http().post(`/documents/${doc}/process`).set('Authorization', bruna).expect(404);
+      await http().delete(`/documents/${doc}`).set('Authorization', bruna).expect(404);
+      await http().get(`/documents/${doc}/shares`).set('Authorization', bruna).expect(404);
+      await http().get(`/documents/${doc}`).set('Authorization', carlos).expect(404);
+      await http().get(`/documents/${doc}/file`).set('Authorization', carlos).expect(404);
+      expect((await http().get('/documents/shared').set('Authorization', carlos).expect(200)).body).toEqual([]);
+      // the administrator does not see documents either
+      await http().get(`/documents/${doc}`).set('Authorization', admin).expect(404);
+    });
+
+    it('access ends when the member leaves the team, the sharing is removed or the team is deleted', async () => {
+      await http().delete(`/teams/${legal}/members/${ids[BRUNA]}`).set('Authorization', admin).expect(204);
+      await http().get(`/documents/${doc}`).set('Authorization', bruna).expect(404);
+      await http().post(`/teams/${legal}/members`).set('Authorization', admin).send({ userId: ids[BRUNA] }).expect(204);
+      await http().get(`/documents/${doc}`).set('Authorization', bruna).expect(200);
+
+      await http().put(`/documents/${doc}/shares`).set('Authorization', alice).send({ teamIds: [] }).expect(200);
+      await http().get(`/documents/${doc}`).set('Authorization', bruna).expect(404);
+
+      await http().put(`/documents/${doc}/shares`).set('Authorization', alice).send({ teamIds: [legal] }).expect(200);
+      await http().delete(`/teams/${legal}`).set('Authorization', admin).expect(204);
+      await http().get(`/documents/${doc}`).set('Authorization', bruna).expect(404);
+      // the document itself stays with its owner
+      await http().get(`/documents/${doc}`).set('Authorization', alice).expect(200);
+    });
+  });
+
   describe('deletion', () => {
     it('deletes the document, its file and its interactions; others cannot', async () => {
       const { body } = await http()
