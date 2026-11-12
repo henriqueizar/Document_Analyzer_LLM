@@ -142,7 +142,8 @@ export class DocumentsService {
     const previous = await this.prisma.llmInteraction.findMany({
       where: { documentId: document.id, role: 'QUESTION' },
       orderBy: { createdAt: 'desc' },
-      take: 3,
+      // the LLM keeps as many of these as fit in its history budget
+      take: 50,
     });
     const history = previous.reverse().map((i) => ({
       question: i.question,

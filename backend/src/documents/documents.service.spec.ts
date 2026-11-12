@@ -200,7 +200,7 @@ describe('DocumentsService', () => {
     ]);
     await service.ask('doc-1', 'q3', OWNER);
     expect(prisma.llmInteraction.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { documentId: 'doc-1', role: 'QUESTION' }, take: 3 }),
+      expect.objectContaining({ where: { documentId: 'doc-1', role: 'QUESTION' }, take: 50 }),
     );
     expect(llm.askQuestion).toHaveBeenCalledWith(expect.anything(), 'q3', [
       { question: 'q1', answer: 'a1 [p. 1]' },

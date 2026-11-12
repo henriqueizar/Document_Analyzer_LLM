@@ -208,8 +208,9 @@ The assistant answers **only from the document**. Defences against hallucination
 - **Automatic check after every answer:** cited pages must be among those provided,
   every multi-digit number must appear in the document, and answers must cite a page.
   Otherwise the answer is shown with a highlighted warning.
-- The last 3 questions and answers are sent as context for follow-ups (never as a
-  source).
+- Earlier questions and answers are sent as conversation context (never as a source):
+  the whole conversation when it is short, otherwise the most recent turns that fit in
+  a quarter of the context window.
 
 No technique removes hallucinations completely; these reduce them and make the rest
 visible. Known limit: keyword selection does not match across languages (an English

@@ -107,6 +107,27 @@ describe('LlmService', () => {
       expect(roles).toEqual(['system', 'user', 'assistant', 'user']);
     });
 
+    it('sends the whole conversation when it is short', async () => {
+      fetchMock.mockResolvedValue(ok('Aviso prévio de 60 dias [p. 3].'));
+      const history = Array.from({ length: 6 }, (_, i) => ({ question: `pergunta ${i}`, answer: `resposta ${i} [p. 1].` }));
+      await new LlmService().askQuestion(contract, 'E agora?', history);
+      // system + 6 x (user, assistant) + final question
+      expect(sent().messages).toHaveLength(1 + 12 + 1);
+      expect(sent().messages[1].content).toBe('Pergunta: pergunta 0');
+    });
+
+    it('drops the oldest turns first when the conversation exceeds its budget', async () => {
+      process.env.LLM_NUM_CTX = '4096'; // history budget ~ 3,000 characters
+      fetchMock.mockResolvedValue(ok('ok [p. 1].'));
+      const long = 'x'.repeat(600);
+      const history = Array.from({ length: 10 }, (_, i) => ({ question: `pergunta ${i}`, answer: long }));
+      await new LlmService().askQuestion(contract, 'E agora?', history);
+      const questions = sent().messages.filter((m: { role: string }) => m.role === 'user').map((m: { content: string }) => m.content);
+      expect(questions.at(-1)).toBe('Pergunta: E agora?');
+      expect(questions).toContain('Pergunta: pergunta 9');
+      expect(questions).not.toContain('Pergunta: pergunta 0');
+    });
+
     it('keeps the document at the start of the prompt so follow-ups can reuse it', async () => {
       fetchMock.mockImplementation(async () => ok('R$ 12.500,00 [p. 2].'));
       const service = new LlmService();

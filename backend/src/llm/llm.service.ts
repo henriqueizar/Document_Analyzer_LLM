@@ -25,8 +25,14 @@ const CHARS_PER_TOKEN = 3;
 /** Tokens kept free for instructions, chat history and the answer itself. */
 const RESERVED_TOKENS = { answer: 1800, explain: 1600 };
 const MAX_TOKENS = { answer: 500, explain: 700 };
-/** Previous question/answer pairs sent to resolve follow-ups ("and clause 9?"). */
-const HISTORY_TURNS = 3;
+/**
+ * Share of the context window for earlier questions and answers. As many
+ * recent turns as fit are sent (whole conversation when it is short); the
+ * oldest are dropped first, so the document excerpts always keep their room.
+ */
+const HISTORY_SHARE = 0.25;
+/** Turns whose questions are also used to find passages for follow-ups. */
+const SEARCH_TURNS = 3;
 
 @Injectable()
 export class LlmService {
@@ -68,9 +74,9 @@ export class LlmService {
   async askQuestion(document: DocumentInput, question: string, history: Turn[] = []): Promise<string> {
     const lang = detectLanguage(question, detectLanguage(document.text));
     const passages = splitIntoPassages(document.text);
-    const recent = history.slice(-HISTORY_TURNS);
-    // Follow-ups ("e a seguinte?") need the previous question's terms to find passages.
-    const searchText = [...recent.map((t) => t.question), question].join('\n');
+    const recent = this.fitHistory(history);
+    // Follow-ups ("e a seguinte?") need the previous questions' terms to find passages.
+    const searchText = [...recent.slice(-SEARCH_TURNS).map((t) => t.question), question].join('\n');
     const historyChars = recent.reduce((n, t) => n + t.question.length + t.answer.length, 0);
     const budget = this.budget(RESERVED_TOKENS.answer) - historyChars;
     const selection = selectPassages(passages, searchText, budget);
@@ -111,6 +117,20 @@ export class LlmService {
       pages: [...new Set(selected.map((p) => p.page))],
       complete: selected.length === all.length,
     };
+  }
+
+  /** The most recent turns that fit in the history budget, oldest first. */
+  private fitHistory(history: Turn[]): Turn[] {
+    const limit = this.numCtx * HISTORY_SHARE * CHARS_PER_TOKEN;
+    const kept: Turn[] = [];
+    let used = 0;
+    for (const turn of [...history].reverse()) {
+      const size = turn.question.length + turn.answer.length;
+      if (used + size > limit) break;
+      kept.unshift(turn);
+      used += size;
+    }
+    return kept;
   }
 
   /** Characters of document text that fit next to the instructions and answer. */
