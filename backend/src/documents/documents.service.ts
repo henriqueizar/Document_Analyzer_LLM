@@ -1,18 +1,15 @@
 import {
   BadRequestException,
   ConflictException,
-  HttpException,
   Injectable,
   Logger,
   NotFoundException,
-  UnprocessableEntityException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { OcrService } from '../ocr/ocr.service';
 import * as path from 'path';
 import { LlmService } from '../llm/llm.service';
-import { isImage, isPdf } from '../common/supported-files';
+import { ProcessingService } from './processing.service';
 import { stripPreamble } from '../llm/clean-response';
 
 const MIME_BY_EXTENSION: Record<string, string> = {
@@ -32,8 +29,8 @@ export class DocumentsService {
 
   constructor(
     private prisma: PrismaService,
-    private ocrService: OcrService,
     private llmService: LlmService,
+    private processing: ProcessingService,
   ) {}
 
   async create(userEmail: string, file: Express.Multer.File) {
@@ -55,79 +52,52 @@ export class DocumentsService {
         status: 'PENDING',
       },
     });
+    // Reading and explaining run in the background; the page shows progress.
+    this.processing.enqueue(document.id);
     return this.toPublic(document);
   }
 
+  /**
+   * Reads the document again and writes a new explanation (retry after a
+   * failure, or after changing the OCR/LLM). Questions and answers are kept.
+   * Runs in the background: returns at once with the queued document.
+   */
   async process(documentId: string, userEmail: string) {
     const document = await this.findOwned(documentId, userEmail);
-    if (document.status === 'PROCESSING') {
-      throw new ConflictException('Document is already being processed');
+    if (this.busy(document)) {
+      throw new ConflictException('This document is already being processed.');
     }
+    const queued = await this.prisma.document.update({
+      where: { id: documentId },
+      data: { status: 'PENDING', failureReason: null, explanationStatus: null, explanationError: null },
+    });
+    this.processing.enqueue(documentId);
+    return this.toPublic(queued);
+  }
 
-    try {
-      await this.prisma.document.update({
-        where: { id: documentId },
-        data: { status: 'PROCESSING' },
-      });
-
-      const fullPath = path.resolve(document.filePath);
-
-      let text = '';
-      if (isPdf(document.originalName)) {
-        text = await this.ocrService.recognizePdf(fullPath);
-      } else if (isImage(document.originalName)) {
-        text = await this.ocrService.extractText(fullPath);
-      } else {
-        throw new UnprocessableEntityException(
-          `Unsupported file type: ${document.originalName}`,
-        );
-      }
-
-      // save the extracted text
-      const updatedDocument = await this.prisma.document.update({
-        where: { id: documentId },
-        data: {
-          extractedText: text,
-          status: 'COMPLETED',
-        },
-      });
-      if (!updatedDocument.extractedText) {
-        throw new UnprocessableEntityException(
-          'No readable text was found in this document. If it is a photo or a scan, try a sharper, well-lit image with the page filling the frame.',
-        );
-      }
-
-      // automatic explanation of the document
-      const explanation = await this.llmService.explainDocument({
-        name: updatedDocument.originalName,
-        text: updatedDocument.extractedText,
-      });
-
-      // save the initial LLM interaction
-      await this.prisma.llmInteraction.create({
-        data: {
-          documentId: updatedDocument.id,
-          role: 'EXPLANATION',
-          question: '',
-          answer: explanation.text,
-          sources: explanation.sources as unknown as Prisma.InputJsonValue,
-        },
-      });
-
-      return this.toPublic(updatedDocument);
-    } catch (error) {
-      this.logger.error(`Processing failed for document ${documentId}`, error);
-
-      await this.prisma.document.update({
-        where: { id: documentId },
-        data: { status: 'FAILED' },
-      });
-
-      if (error instanceof HttpException) throw error;
-      throw new UnprocessableEntityException(
-        error instanceof Error ? error.message : 'Document processing failed',
-      );
+  /** Writes the automatic explanation again (e.g. after the LLM was unavailable). */
+  async explain(documentId: string, userEmail: string) {
+    const document = await this.findOwned(documentId, userEmail);
+    if (document.status !== 'COMPLETED') {
+      throw new ConflictException('The document must be read before it can be explained.');
     }
+    if (this.busy(document)) {
+      throw new ConflictException('This document is already being processed.');
+    }
+    const queued = await this.prisma.document.update({
+      where: { id: documentId },
+      data: { explanationStatus: 'PENDING', explanationError: null },
+    });
+    this.processing.enqueue(documentId);
+    return this.toPublic(queued);
+  }
+
+  private busy(document: { id: string; status: string; explanationStatus: string | null }) {
+    return (
+      this.processing.isQueued(document.id) ||
+      ['PENDING', 'PROCESSING'].includes(document.status) ||
+      ['PENDING', 'PROCESSING'].includes(document.explanationStatus ?? '')
+    );
   }
 
   async ask(documentId: string, question: string, userEmail: string) {
@@ -205,6 +175,7 @@ export class DocumentsService {
         id: true,
         originalName: true,
         status: true,
+        explanationStatus: true,
         createdAt: true,
       },
     });
@@ -229,6 +200,7 @@ export class DocumentsService {
 
   /** Strip server-side storage details before returning a document. */
   private toPublic<T extends { filePath: string; filename: string }>(document: T) {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- dropped on purpose
     const { filePath: _filePath, filename: _filename, ...rest } = document;
     return rest;
   }

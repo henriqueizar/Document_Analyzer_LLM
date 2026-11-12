@@ -47,7 +47,15 @@ model Document {
   filename      String
   filePath      String
   extractedText String?
+  /// Reading the document (OCR / text layer): PENDING = queued,
+  /// PROCESSING = reading, COMPLETED = text ready (questions allowed), FAILED.
   status        DocumentStatus   @default(PENDING)
+  /// Why reading failed, shown to the user.
+  failureReason String?
+  /// The automatic explanation, tracked apart from reading: an LLM outage
+  /// does not make a document that was read successfully unusable.
+  explanationStatus DocumentStatus?
+  explanationError  String?
   interactions  LlmInteraction[]
   createdAt     DateTime         @default(now())
 }

@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
   Param,
   Post,
   StreamableFile,
@@ -64,10 +65,18 @@ export class DocumentsController {
     return this.documentsService.create(user.email, file);
   }
 
+  /** Read again and re-explain, in the background (202: queued). */
   @Post(':id/process')
-  async process(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    await this.documentsService.process(id, user.email);
-    return { message: 'Processing completed' };
+  @HttpCode(202)
+  process(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.documentsService.process(id, user.email);
+  }
+
+  /** Write the automatic explanation again, in the background. */
+  @Post(':id/explain')
+  @HttpCode(202)
+  explain(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.documentsService.explain(id, user.email);
   }
 
   @Post(':id/ask')

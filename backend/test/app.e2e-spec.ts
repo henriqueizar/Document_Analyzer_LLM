@@ -1,6 +1,6 @@
 /**
  * End-to-end test of the main flow over HTTP:
- *   upload -> process (real OCR) -> get -> ask, plus auth and error paths.
+ *   upload -> background processing (real OCR) -> get -> ask, plus auth and error paths.
  *
  * Requires the Postgres container (`docker compose up -d postgres`) and
  * DATABASE_URL (read from backend/.env if present). The LLM is replaced by a
@@ -16,6 +16,7 @@ import { LlmService } from '../src/llm/llm.service';
 import { JWT_AUDIENCE, JWT_ISSUER } from '../src/auth/auth.constants';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { hashPassword } from '../src/auth/password';
+import { ProcessingService } from '../src/documents/processing.service';
 
 try {
   process.loadEnvFile();
@@ -57,6 +58,8 @@ describe('Documents API (e2e)', () => {
   let app: INestApplication;
   let alice: string;
   let mallory: string;
+  /** Waits until the background queue has processed everything uploaded so far. */
+  const processed = () => app.get(ProcessingService).idle();
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
@@ -81,7 +84,7 @@ describe('Documents API (e2e)', () => {
 
   const http = () => request(app.getHttpServer());
 
-  it('main flow: upload -> process -> get -> ask (multi-page PDF)', async () => {
+  it('main flow: upload -> background processing -> get -> ask (multi-page PDF)', async () => {
     const upload = await http()
       .post('/documents/upload')
       .set('Authorization', alice)
@@ -91,10 +94,12 @@ describe('Documents API (e2e)', () => {
     expect(upload.body.status).toBe('PENDING');
     expect(upload.body).not.toHaveProperty('filePath');
 
-    await http().post(`/documents/${id}/process`).set('Authorization', alice).expect(201);
+    // Upload returns at once; reading and explaining happen in the background.
+    await processed();
 
     const doc = await http().get(`/documents/${id}`).set('Authorization', alice).expect(200);
     expect(doc.body.document.status).toBe('COMPLETED');
+    expect(doc.body.document.explanationStatus).toBe('COMPLETED');
     expect(doc.body.document.extractedText).toMatch(/PAGE 1/);
     expect(doc.body.document.extractedText).toMatch(/PAGE 3/);
     expect(doc.body.interactions).toEqual([
@@ -125,7 +130,7 @@ describe('Documents API (e2e)', () => {
       .set('Authorization', alice)
       .attach('file', fixture('receipt.png'))
       .expect(201);
-    await http().post(`/documents/${body.id}/process`).set('Authorization', alice).expect(201);
+    await processed();
     const doc = await http().get(`/documents/${body.id}`).set('Authorization', alice).expect(200);
     expect(doc.body.document.extractedText).toMatch(/RECEIPT TOTAL 42/);
   });
@@ -216,17 +221,54 @@ describe('Documents API (e2e)', () => {
       await http().get('/documents/does-not-exist').set('Authorization', alice).expect(404);
     });
 
-    it('409 when asking before processing', async () => {
-      const { body } = await http()
-        .post('/documents/upload')
-        .set('Authorization', alice)
-        .attach('file', fixture('doc-b.pdf'))
-        .expect(201);
+    it('409 when asking before the document is read', async () => {
+      const prisma = app.get(PrismaService);
+      const owner = await prisma.user.findUniqueOrThrow({ where: { email: ALICE } });
+      // a document still waiting in the queue
+      const pending = await prisma.document.create({
+        data: { userId: owner.id, originalName: 'x.pdf', filename: 'x.pdf', filePath: 'uploads/x.pdf', status: 'PENDING' },
+      });
       await http()
-        .post(`/documents/${body.id}/ask`)
+        .post(`/documents/${pending.id}/ask`)
         .set('Authorization', alice)
         .send({ question: 'too early?' })
         .expect(409);
+    });
+
+    it('reprocessing returns 202 at once and processes again in the background', async () => {
+      const { body } = await http()
+        .post('/documents/upload')
+        .set('Authorization', alice)
+        .attach('file', fixture('receipt.png'))
+        .expect(201);
+      await processed();
+      const queued = await http().post(`/documents/${body.id}/process`).set('Authorization', alice).expect(202);
+      expect(queued.body.status).toBe('PENDING');
+      await processed();
+      const doc = await http().get(`/documents/${body.id}`).set('Authorization', alice).expect(200);
+      expect(doc.body.document).toMatchObject({ status: 'COMPLETED', explanationStatus: 'COMPLETED' });
+      expect(doc.body.interactions.filter((i: { role: string }) => i.role === 'EXPLANATION')).toHaveLength(1);
+    });
+
+    it('a failed explanation keeps the document usable, and can be retried alone', async () => {
+      llmStub.explainDocument.mockRejectedValueOnce(new Error('LLM unavailable: Ollama is not reachable'));
+      const { body } = await http()
+        .post('/documents/upload')
+        .set('Authorization', alice)
+        .attach('file', fixture('receipt.png'))
+        .expect(201);
+      await processed();
+      const failed = await http().get(`/documents/${body.id}`).set('Authorization', alice).expect(200);
+      expect(failed.body.document).toMatchObject({
+        status: 'COMPLETED',
+        explanationStatus: 'FAILED',
+        explanationError: 'LLM unavailable: Ollama is not reachable',
+      });
+      await http().post(`/documents/${body.id}/ask`).set('Authorization', alice).send({ question: 'total?' }).expect(201);
+      await http().post(`/documents/${body.id}/explain`).set('Authorization', alice).expect(202);
+      await processed();
+      const retried = await http().get(`/documents/${body.id}`).set('Authorization', alice).expect(200);
+      expect(retried.body.document.explanationStatus).toBe('COMPLETED');
     });
   });
 });

@@ -1,13 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import {
-  BadRequestException,
-  ConflictException,
-  NotFoundException,
-  UnprocessableEntityException,
-} from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { DocumentsService } from './documents.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { OcrService } from '../ocr/ocr.service';
+import { ProcessingService } from './processing.service';
 import { LlmService } from '../llm/llm.service';
 
 const OWNER = 'alice@example.com';
@@ -40,15 +35,12 @@ function makePrisma(originalName: string, overrides: Record<string, unknown> = {
 describe('DocumentsService', () => {
   let service: DocumentsService;
   let prisma: ReturnType<typeof makePrisma>;
-  let ocr: { recognizePdf: jest.Mock; extractText: jest.Mock };
+  let processing: { enqueue: jest.Mock; isQueued: jest.Mock };
   let llm: { explainDocument: jest.Mock; askQuestion: jest.Mock };
 
   async function build(originalName: string, overrides: Record<string, unknown> = {}) {
     prisma = makePrisma(originalName, overrides);
-    ocr = {
-      recognizePdf: jest.fn().mockResolvedValue('pdf text'),
-      extractText: jest.fn().mockResolvedValue('image text'),
-    };
+    processing = { enqueue: jest.fn(), isQueued: jest.fn().mockReturnValue(false) };
     llm = {
       explainDocument: jest.fn().mockResolvedValue({ text: 'explanation', sources: [{ page: 1, text: 'src' }] }),
       askQuestion: jest.fn().mockResolvedValue({ text: 'answer', sources: [{ page: 1, text: 'src' }] }),
@@ -57,57 +49,18 @@ describe('DocumentsService', () => {
       providers: [
         DocumentsService,
         { provide: PrismaService, useValue: prisma },
-        { provide: OcrService, useValue: ocr },
+        { provide: ProcessingService, useValue: processing },
         { provide: LlmService, useValue: llm },
       ],
     }).compile();
     service = module.get(DocumentsService);
   }
 
-  it('routes an upper-case .PDF to the PDF pipeline', async () => {
-    await build('SCAN.PDF');
-    await service.process('doc-1', OWNER);
-    expect(ocr.recognizePdf).toHaveBeenCalled();
-    expect(ocr.extractText).not.toHaveBeenCalled();
-  });
-
-  it('routes images to image OCR and stores the explanation', async () => {
-    await build('photo.JPG');
-    await service.process('doc-1', OWNER);
-    expect(ocr.extractText).toHaveBeenCalled();
-    expect(llm.explainDocument).toHaveBeenCalledWith({ name: 'photo.JPG', text: 'image text' });
-    expect(prisma.llmInteraction.create).toHaveBeenCalled();
-  });
-
-  it('marks unsupported files as FAILED without calling OCR', async () => {
-    await build('notes.txt');
-    const result = service.process('doc-1', OWNER);
-    await expect(result).rejects.toBeInstanceOf(UnprocessableEntityException);
-    await expect(result).rejects.toThrow(/Unsupported file type/);
-    expect(ocr.extractText).not.toHaveBeenCalled();
-    expect(prisma.document.update).toHaveBeenLastCalledWith({
-      where: { id: 'doc-1' },
-      data: { status: 'FAILED' },
-    });
-  });
-
   describe('HTTP errors', () => {
     it('process: 404 for an unknown document', async () => {
       await build('a.png');
       prisma.document.findFirst.mockResolvedValue(null);
       await expect(service.process('nope', OWNER)).rejects.toBeInstanceOf(NotFoundException);
-    });
-
-    it('process: OCR failure marks FAILED and returns 422', async () => {
-      await build('a.png');
-      ocr.extractText.mockRejectedValue(new Error('OCR failed for a.png'));
-      await expect(service.process('doc-1', OWNER)).rejects.toBeInstanceOf(
-        UnprocessableEntityException,
-      );
-      expect(prisma.document.update).toHaveBeenLastCalledWith({
-        where: { id: 'doc-1' },
-        data: { status: 'FAILED' },
-      });
     });
 
     it('ask: 404 for an unknown document', async () => {
@@ -166,7 +119,7 @@ describe('DocumentsService', () => {
       await expect(service.process('doc-1', 'mallory@example.com')).rejects.toBeInstanceOf(
         NotFoundException,
       );
-      expect(ocr.extractText).not.toHaveBeenCalled();
+      expect(processing.enqueue).not.toHaveBeenCalled();
       expect(llm.askQuestion).not.toHaveBeenCalled();
     });
 
@@ -177,8 +130,35 @@ describe('DocumentsService', () => {
       expect(document).not.toHaveProperty('filename');
     });
 
-    it('refuses to re-process a document that is already PROCESSING', async () => {
+    it('refuses to re-process a document that is already being processed', async () => {
       await build('a.png', { status: 'PROCESSING' });
+      await expect(service.process('doc-1', OWNER)).rejects.toBeInstanceOf(ConflictException);
+    });
+  });
+
+  describe('background processing', () => {
+    it('process queues the document again and returns at once', async () => {
+      await build('a.png', { status: 'FAILED', failureReason: 'old' });
+      const doc = await service.process('doc-1', OWNER);
+      expect(doc).toMatchObject({ status: 'PENDING', failureReason: null });
+      expect(processing.enqueue).toHaveBeenCalledWith('doc-1');
+    });
+
+    it('explain re-queues only the explanation of a document that was read', async () => {
+      await build('a.png', { status: 'COMPLETED', extractedText: 't', explanationStatus: 'FAILED' });
+      const doc = await service.explain('doc-1', OWNER);
+      expect(doc).toMatchObject({ status: 'COMPLETED', explanationStatus: 'PENDING' });
+      expect(processing.enqueue).toHaveBeenCalledWith('doc-1');
+    });
+
+    it('explain refuses a document that has not been read', async () => {
+      await build('a.png', { status: 'FAILED' });
+      await expect(service.explain('doc-1', OWNER)).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('refuses work on a document that is already queued', async () => {
+      await build('a.png', { status: 'COMPLETED', extractedText: 't', explanationStatus: 'COMPLETED' });
+      processing.isQueued.mockReturnValue(true);
       await expect(service.process('doc-1', OWNER)).rejects.toBeInstanceOf(ConflictException);
     });
   });
