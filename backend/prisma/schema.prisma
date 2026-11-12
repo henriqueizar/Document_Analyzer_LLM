@@ -28,6 +28,9 @@ model User {
   role         Role       @default(USER)
   /// When the user read and accepted the privacy notice (shown after the first login).
   privacyAcceptedAt DateTime?
+  /// Language of the interface and of the LLM's explanations and answers
+  /// for this user: "pt" or "en". Defaults to the installation's language.
+  language     String     @default("pt")
   documents    Document[]
   createdAt    DateTime   @default(now())
 }
@@ -73,5 +76,10 @@ model LlmInteraction {
   /// STRICT: only what the document states. INTERPRETATION: the model's
   /// analysis, requested explicitly by the user and always labelled as such.
   mode       String   @default("STRICT")
+  /// Language the answer was generated in ("pt" / "en").
+  language   String?
+  /// On-demand translations: { "<lang>": { text, verified } }. The original
+  /// answer is never replaced.
+  translations Json?
   createdAt  DateTime @default(now())
 }

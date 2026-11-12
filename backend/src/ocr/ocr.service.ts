@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { createWorker, Worker } from 'tesseract.js';
 import { PDFParse } from 'pdf-parse';
+import { repairShiftedGlyphs } from './shifted-glyphs';
 import { PDFDocument } from 'pdf-lib';
 import * as path from 'path';
 import * as fs from 'fs/promises';
@@ -94,7 +95,10 @@ export class OcrService {
 
       const texts: string[] = [];
       for (const page of pages) {
-        let text = page.text.trim();
+        // fonts without a character map yield shifted text ("0XOWLDJHQW" for "Multiagent")
+        // leftover control characters carry no text and break copy-paste in some apps
+        // eslint-disable-next-line no-control-regex -- removing control characters on purpose
+        let text = repairShiftedGlyphs(page.text).replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, ' ').trim();
         if (text.length < MIN_TEXT_LAYER_CHARS) {
           worker ??= await this.createOcrWorker();
           const shot = await parser.getScreenshot({

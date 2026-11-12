@@ -1,21 +1,24 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { stripPreamble } from './clean-response';
-import { OllamaClient, ollamaConfigFromEnv } from './ollama.client';
+import { ChatMessage, ChatOptions, OllamaClient, ollamaConfigFromEnv } from './ollama.client';
 import { formatPassages, leading, selectPassages, splitIntoPassages, Passage } from './passages';
 import { detectLanguage, Language } from './language';
 import {
   AnswerMode,
   answerMessages,
   DocumentContext,
+  NEEDS_INTERPRETATION,
   NOT_FOUND,
   explainMessages,
   partialExplanationNote,
   Turn,
 } from './prompts';
 import {
+  asksToChooseAnswer,
   checkGrounding,
   groundingWarning,
   hasCitation,
+  isInterpretationNotice,
   isNegativeOnly,
   isNotFound,
   unsupportedJudgement,
@@ -32,6 +35,8 @@ export interface DocumentInput {
 /** An explanation or answer, with the document passages the model was given. */
 export interface LlmResult {
   text: string;
+  /** Language the text was written in. */
+  language?: Language;
   /** What each [p. N] in `text` can refer to: exactly what the model saw. */
   sources: Source[];
 }
@@ -68,15 +73,16 @@ export class LlmService {
   }
 
   /** Automatic explanation shown when a document is processed. */
-  async explainDocument(document: DocumentInput): Promise<LlmResult> {
-    const lang = detectLanguage(document.text);
+  /** `language`: the reader's preference; when absent, the document's language. */
+  async explainDocument(document: DocumentInput, language?: Language): Promise<LlmResult> {
+    const lang = language ?? detectLanguage(document.text);
     const passages = splitIntoPassages(document.text);
     const budget = this.budget(RESERVED_TOKENS.explain);
     const selected = leading(passages, budget);
     const doc = this.context(document, passages, selected);
     const sources = toSources(selected);
 
-    const raw = await this.client.chat(explainMessages(lang, doc), {
+    const raw = await this.chatIn(lang, explainMessages(lang, doc), {
       temperature: 0,
       maxTokens: MAX_TOKENS.explain,
     });
@@ -85,7 +91,7 @@ export class LlmService {
 
     explanation = this.withGroundingCheck(explanation, doc, lang, { requireCitation: true });
     if (!doc.complete) explanation += `\n\n${partialExplanationNote(lang, doc)}`;
-    return { text: explanation, sources };
+    return { text: explanation, sources, language: lang };
   }
 
   /**
@@ -105,8 +111,10 @@ export class LlmService {
     question: string,
     history: Turn[] = [],
     mode: AnswerMode = 'STRICT',
+    language?: Language,
   ): Promise<LlmResult> {
-    const lang = detectLanguage(question, detectLanguage(document.text));
+    // The reader's preference; without one, the language of the question.
+    const lang = language ?? detectLanguage(question, detectLanguage(document.text));
     const passages = splitIntoPassages(document.text);
     const recent = this.fitHistory(history);
     // Follow-ups ("e a seguinte?") need the previous questions' terms to find passages.
@@ -117,40 +125,109 @@ export class LlmService {
     const doc = this.context(document, passages, selection.passages);
     const sources = toSources(selection.passages);
 
-    const raw = await this.client.chat(answerMessages(lang, doc, question, recent, mode), {
+    // Earlier refusals carry no information and lead small models to refuse
+    // again ("Não encontrei..." three times in a row); they are not sent.
+    const conversation = recent.filter(
+      (t) => !(isNotFound(t.answer) && !hasCitation(t.answer)) && !isInterpretationNotice(t.answer),
+    );
+    // Choosing an exercise's answer is the model's own conclusion: refused in
+    // strict mode before asking, unless the document has its own answer key.
+    if (mode === 'STRICT' && asksToChooseAnswer(question, document.text)) {
+      this.logger.warn('Question asks to choose an exercise answer; pointed to Interpret');
+      return { text: NEEDS_INTERPRETATION.exercise[lang], sources, language: lang };
+    }
+    const raw = await this.chatIn(lang, answerMessages(lang, doc, question, conversation, mode), {
       temperature: 0,
       maxTokens: mode === 'INTERPRETATION' ? MAX_TOKENS.interpretation : MAX_TOKENS.answer,
     });
     const answer = stripPreamble(raw) || '';
     if (!answer) {
-      return { text: lang === 'pt' ? 'O modelo não retornou resposta.' : 'The model returned an empty response.', sources };
+      return { text: lang === 'pt' ? 'O modelo não retornou resposta.' : 'The model returned an empty response.', sources, language: lang };
     }
     // "A multa não está especificada. Não encontrei essa informação no documento."
     // -> just the standard sentence. Answers that cite pages carry real content
     // (e.g. one part found, another not) and are kept as they are.
-    if (isNotFound(answer) && !hasCitation(answer)) return { text: NOT_FOUND[lang], sources };
+    if (isNotFound(answer) && !hasCitation(answer)) return { text: NOT_FOUND[lang], sources, language: lang };
     // A refusal in the model's own words ("... não está mencionada no documento. [p. 4]")
     // is shown as the standard sentence, without a misleading page.
-    if (isNegativeOnly(answer)) return { text: NOT_FOUND[lang], sources };
+    if (isNegativeOnly(answer)) return { text: NOT_FOUND[lang], sources, language: lang };
 
     // Cite, by code, sentences that clearly come from a passage.
     const cited = attributeCitations(answer, sources);
     if (mode === 'STRICT' && !hasCitation(cited)) {
       this.logger.warn(`Answer not tied to the document, replaced by the refusal: ${JSON.stringify(answer.slice(0, 120))}`);
-      return { text: NOT_FOUND[lang], sources };
+      return { text: NOT_FOUND[lang], sources, language: lang };
     }
     // Picking an exercise's answer or judging is the model's own conclusion even
     // when the quoted option is in the document: strict mode does not show it.
     const judgement = mode === 'STRICT' ? unsupportedJudgement(cited, doc.excerpts) : null;
     if (judgement) {
-      this.logger.warn(`Judgement not stated in the document ("${judgement}"), replaced by the refusal`);
-      return { text: NOT_FOUND[lang], sources };
+      this.logger.warn(`Judgement not stated in the document ("${judgement}"), pointed to Interpret`);
+      return { text: NEEDS_INTERPRETATION.judgement[lang], sources, language: lang };
     }
 
     return {
       text: this.withGroundingCheck(cited, doc, lang, { requireCitation: true, ignore: question }),
       sources,
+      language: lang,
     };
+  }
+
+  /**
+   * Small models sometimes answer in English even when told to write in
+   * Portuguese (more so when the excerpts contain English). When the reply
+   * comes back in the wrong language, ask once more with an explicit
+   * reminder at the end of the request.
+   */
+  /**
+   * Translates an explanation or answer for a reader of another language. The
+   * original is never replaced; the translation is shown as such. Citations and
+   * numbers must survive unchanged: if they do not, it is tried once more and,
+   * failing that, returned with verified = false so the reader is warned.
+   */
+  async translate(text: string, to: Language): Promise<{ text: string; verified: boolean }> {
+    const instructions =
+      to === 'pt'
+        ? 'Traduza o texto do usuário para o português do Brasil. Regras: traduza fielmente, sem resumir, acrescentar ou comentar; mantenha exatamente cada marcador [p. N], todos os números, valores, datas e nomes próprios; mantenha as quebras de parágrafo; responda apenas com a tradução.'
+        : 'Translate the user\'s text into English. Rules: translate faithfully, without summarising, adding or commenting; keep every [p. N] marker, number, amount, date and proper name exactly; keep paragraph breaks; reply with the translation only.';
+    let best = '';
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const raw = await this.client.chat(
+        [
+          { role: 'system', content: instructions },
+          { role: 'user', content: text },
+        ],
+        { temperature: 0, maxTokens: MAX_TOKENS.explain + 300 },
+      );
+      best = stripPreamble(raw);
+      if (sameCitationsAndNumbers(text, best)) return { text: best, verified: true };
+      this.logger.warn('Translation changed citations or numbers; trying again');
+    }
+    return { text: best, verified: false };
+  }
+
+  private async chatIn(lang: Language, messages: ChatMessage[], options: ChatOptions): Promise<string> {
+    const first = await this.client.chat(messages, options);
+    if (!this.wrongLanguage(first, lang)) return first;
+
+    this.logger.warn(`Reply not in ${lang}; asking again with an explicit language reminder`);
+    const reminder =
+      lang === 'pt'
+        ? '\n\nIMPORTANTE: escreva toda a resposta em português do Brasil, mesmo que o documento esteja em outro idioma. Citações literais do documento podem ficar no idioma original.'
+        : '\n\nIMPORTANT: write the whole answer in English, even if the document is in another language. Literal quotes from the document may stay in their original language.';
+    const last = messages[messages.length - 1];
+    const second = await this.client.chat(
+      [...messages.slice(0, -1), { ...last, content: last.content + reminder }],
+      options,
+    );
+    return second;
+  }
+
+  /** Long enough to judge, not a refusal, and clearly in the other language. */
+  private wrongLanguage(text: string, lang: Language): boolean {
+    const plain = text.replace(/\[\s*p\.?\s*\d+\s*\]/gi, '').trim();
+    if (isNotFound(plain) || plain.split(/\s+/).length < 8) return false;
+    return detectLanguage(plain, lang) !== lang;
   }
 
   private withGroundingCheck(
@@ -198,4 +275,14 @@ export class LlmService {
 
 function toSources(passages: Passage[]): Source[] {
   return passages.map((p) => ({ page: p.page, text: p.text }));
+}
+
+/** Citations and multi-digit numbers of the original, all present in the translation. */
+export function sameCitationsAndNumbers(original: string, translated: string): boolean {
+  const cites = (t: string) => [...t.matchAll(/\[\s*p\.?\s*(\d+)\s*\]/gi)].map((m) => m[1]).sort().join(',');
+  const numbers = (t: string) =>
+    (t.replace(/\[\s*p\.?\s*\d+\s*\]/gi, '').match(/\d[\d.,]*\d|\d{2,}/g) ?? []).map((n) => n.replace(/\D/g, ''));
+  if (cites(original) !== cites(translated)) return false;
+  const translatedNumbers = new Set(numbers(translated));
+  return numbers(original).every((n) => translatedNumbers.has(n));
 }

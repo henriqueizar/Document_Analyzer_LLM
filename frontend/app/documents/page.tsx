@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSession } from 'next-auth/react';
 import { apiFetch, errorMessage } from '@/lib/api';
+import { useI18n, type MessageKey } from '@/lib/i18n';
 
 type Status = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
 
@@ -15,13 +16,13 @@ interface DocumentSummary {
   createdAt: string;
 }
 
-function statusLabel(d: DocumentSummary): string {
-  if (d.status === 'PENDING') return 'In the queue';
-  if (d.status === 'PROCESSING') return 'Reading';
-  if (d.status === 'FAILED') return 'Could not be read';
-  if (d.explanationStatus === 'PENDING' || d.explanationStatus === 'PROCESSING') return 'Writing explanation';
-  if (d.explanationStatus === 'FAILED') return 'Ready (no explanation)';
-  return 'Ready';
+function statusLabel(d: DocumentSummary): MessageKey {
+  if (d.status === 'PENDING') return 'status.queue';
+  if (d.status === 'PROCESSING') return 'status.reading';
+  if (d.status === 'FAILED') return 'status.failed';
+  if (d.explanationStatus === 'PENDING' || d.explanationStatus === 'PROCESSING') return 'status.writing';
+  if (d.explanationStatus === 'FAILED') return 'status.readyNoExplanation';
+  return 'status.ready';
 }
 
 const inProgress = (d: DocumentSummary) =>
@@ -40,6 +41,7 @@ export default function DocumentsListPage() {
   const { data: session, status } = useSession();
   const [docs, setDocs] = useState<DocumentSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const { t, server, language } = useI18n();
 
   const email = session?.user?.email;
   useEffect(() => {
@@ -62,12 +64,12 @@ export default function DocumentsListPage() {
     return () => clearInterval(interval);
   }, [busy]);
 
-  if (status === 'loading') return <p>Loading session...</p>;
+  if (status === 'loading') return <p>{t('common.loadingSession')}</p>;
   if (!session) {
     return (
       <div className="centered">
-        <p>You must be logged in to see your documents.</p>
-        <Link href="/login">Go to login</Link>
+        <p>{t('documents.mustLogin')}</p>
+        <Link href="/login">{t('common.goToLogin')}</Link>
       </div>
     );
   }
@@ -75,23 +77,23 @@ export default function DocumentsListPage() {
   return (
     <div>
       <div className="title-row">
-        <h1>My documents</h1>
-        <Link href="/upload" className="button-link">Upload document</Link>
+        <h1>{t('documents.title')}</h1>
+        <Link href="/upload" className="button-link">{t('home.upload')}</Link>
       </div>
 
-      {error && <p role="alert" className="error">Error: {error}</p>}
-      {!docs && !error && <p>Loading...</p>}
+      {error && <p role="alert" className="error">{t('common.error', { message: server(error) })}</p>}
+      {!docs && !error && <p>{t('common.loading')}</p>}
       {docs && docs.length === 0 && (
         <p>
-          No documents yet. <Link href="/upload">Upload your first one</Link>.
+          {t('documents.empty')} <Link href="/upload">{t('documents.uploadFirst')}</Link>.
         </p>
       )}
 
       {docs?.map((doc) => (
         <Link key={doc.id} href={`/documents/${doc.id}`} className="doc-item">
           <strong>{doc.originalName}</strong>
-          <span>{statusLabel(doc)}</span>
-          <small>{new Date(doc.createdAt).toLocaleString()}</small>
+          <span>{t(statusLabel(doc))}</span>
+          <small>{new Date(doc.createdAt).toLocaleString(language === 'pt' ? 'pt-BR' : 'en')}</small>
         </Link>
       ))}
     </div>

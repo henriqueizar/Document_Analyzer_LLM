@@ -10,6 +10,7 @@ import {
 import { Role, User } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { hashPassword, passwordProblem, verifyPassword } from '../auth/password';
+import { defaultLanguage, isLanguage } from '../common/language';
 
 export interface PublicUser {
   id: string;
@@ -21,6 +22,8 @@ export interface PublicUser {
   active: boolean;
   /** When the privacy notice was accepted; null until the user reads it. */
   privacyAcceptedAt: Date | null;
+  /** Interface and LLM language: 'pt' or 'en'. */
+  language: string;
 }
 
 export interface NewUser {
@@ -28,6 +31,7 @@ export interface NewUser {
   email?: string;
   password?: string;
   role?: Role;
+  language?: string;
 }
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -76,6 +80,15 @@ export class UsersService {
   async me(email: string): Promise<PublicUser> {
     const user = await this.prisma.user.findUnique({ where: { email: normalizeEmail(email) } });
     if (!user) throw new NotFoundException('User not found.');
+    return toPublic(user);
+  }
+
+  async setLanguage(email: string, language: unknown): Promise<PublicUser> {
+    if (!isLanguage(language)) throw new BadRequestException('Language must be "pt" or "en".');
+    const user = await this.prisma.user.update({
+      where: { email: normalizeEmail(email) },
+      data: { language },
+    });
     return toPublic(user);
   }
 
@@ -135,7 +148,12 @@ export class UsersService {
     if (existing?.passwordHash) {
       throw new ConflictException('A user with this e-mail already exists.');
     }
-    const data = { name, role, passwordHash: await hashPassword(input.password as string) };
+    const data = {
+      name,
+      role,
+      passwordHash: await hashPassword(input.password as string),
+      language: isLanguage(input.language) ? input.language : defaultLanguage(),
+    };
     // Accounts created before local login (e.g. via Google) keep their documents.
     const user =
       existing && allowExisting
@@ -180,5 +198,6 @@ function toPublic(user: User): PublicUser {
     createdAt: user.createdAt,
     active: Boolean(user.passwordHash),
     privacyAcceptedAt: user.privacyAcceptedAt ?? null,
+    language: user.language,
   };
 }

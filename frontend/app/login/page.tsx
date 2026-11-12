@@ -4,11 +4,13 @@ import { signIn, useSession } from 'next-auth/react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useState } from 'react';
 import { API_URL } from '@/lib/api';
+import { useI18n } from '@/lib/i18n';
 
 function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
   const { status } = useSession();
+  const { t, server } = useI18n();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -37,36 +39,36 @@ function LoginForm() {
     } else {
       setError(
         res?.error && res.error !== 'CredentialsSignin'
-          ? res.error
-          : 'Incorrect e-mail or password.',
+          ? server(res.error)
+          : server('Incorrect e-mail or password.'),
       );
     }
   }
 
   return (
     <div className="centered">
-      <h1>Document LLM Analyzer</h1>
-      <p>Sign in with your account.</p>
+      <h1>{t('app.title')}</h1>
+      <p>{t('login.subtitle')}</p>
       <form onSubmit={submit} className="form">
         <label>
-          E-mail
+          {t('common.email')}
           <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="username" required autoFocus />
         </label>
         <label>
-          Password
+          {t('common.password')}
           <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required />
         </label>
         {error && <p role="alert" className="error">{error}</p>}
-        <button type="submit" disabled={busy}>{busy ? 'Signing in...' : 'Sign in'}</button>
+        <button type="submit" disabled={busy}>{busy ? t('login.submitting') : t('login.submit')}</button>
       </form>
-      <small>Forgot your password? Ask your administrator to reset it.</small>
+      <small>{t('login.forgot')}</small>
     </div>
   );
 }
 
 export default function LoginPage() {
   return (
-    <Suspense fallback={<p>Loading...</p>}>
+    <Suspense fallback={<p>...</p>}>
       <LoginForm />
     </Suspense>
   );

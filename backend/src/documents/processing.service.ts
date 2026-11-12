@@ -73,8 +73,13 @@ export class ProcessingService implements OnApplicationBootstrap {
   }
 
   private async run(id: string) {
-    const document = await this.prisma.document.findUnique({ where: { id } });
+    const document = await this.prisma.document.findUnique({
+      where: { id },
+      include: { user: { select: { language: true } } },
+    });
     if (!document) return;
+    // The explanation is written in the language of whoever uploaded the document.
+    const language = (document as { user?: { language?: string } }).user?.language === 'en' ? 'en' : 'pt';
 
     let text = document.extractedText;
     if (document.status !== 'COMPLETED' || !text) {
@@ -82,7 +87,7 @@ export class ProcessingService implements OnApplicationBootstrap {
       if (!text) return;
     }
     if (document.status !== 'COMPLETED' || document.explanationStatus !== 'COMPLETED') {
-      await this.explain(id, document.originalName, text);
+      await this.explain(id, document.originalName, text, language);
     }
   }
 
@@ -115,13 +120,13 @@ export class ProcessingService implements OnApplicationBootstrap {
     }
   }
 
-  private async explain(id: string, name: string, text: string) {
+  private async explain(id: string, name: string, text: string, language: 'pt' | 'en') {
     await this.prisma.document.update({
       where: { id },
       data: { explanationStatus: 'PROCESSING', explanationError: null },
     });
     try {
-      const explanation = await this.llm.explainDocument({ name, text });
+      const explanation = await this.llm.explainDocument({ name, text }, language);
       // A new explanation replaces the previous one (reprocessing); Q&A are kept.
       await this.prisma.$transaction([
         this.prisma.llmInteraction.deleteMany({ where: { documentId: id, role: 'EXPLANATION' } }),
@@ -132,6 +137,7 @@ export class ProcessingService implements OnApplicationBootstrap {
             question: '',
             answer: explanation.text,
             sources: explanation.sources as unknown as Prisma.InputJsonValue,
+            language: explanation.language ?? language,
           },
         }),
         this.prisma.document.update({ where: { id }, data: { explanationStatus: 'COMPLETED' } }),

@@ -1,5 +1,5 @@
 import type { Language } from './language';
-import { NOT_FOUND } from './prompts';
+import { NEEDS_INTERPRETATION, NOT_FOUND } from './prompts';
 import { normalize } from './passages';
 
 export interface GroundingResult {
@@ -39,7 +39,36 @@ export function isNegativeOnly(answer: string): boolean {
     .split(/(?<=[.!?])\s+/)
     .map((x) => x.trim())
     .filter(Boolean);
-  return sentences.length > 0 && sentences.every((x) => NEGATIVE.some((re) => re.test(x)));
+  // the standard sentence counts too: "X não é mencionado. Não encontrei essa informação no documento. [p. 7]"
+  return sentences.length > 0 && sentences.every((x) => isNotFound(x) || NEGATIVE.some((re) => re.test(x)));
+}
+
+/**
+ * Questions that ask for the answer to an exercise or test question. The model
+ * may not pick it in strict mode, and it does not always say so with words the
+ * answer check can see ("B) dividir as férias..."), so the question is checked.
+ */
+const ASKS_TO_CHOOSE: RegExp[] = [
+  /\bresposta\s+(?:certa\s+|correta\s+)?(?:d[ao]|para\s+[ao]|a)\s+(?:questao|exercicio|item)\b/,
+  /\b(?:alternativa|assertiva|afirmativa|opcao)s?\s+(?:esta\s+|e\s+)?(?:correta|certa|verdadeira|incorreta|errada|falsa|responde)/,
+  /\bqual\s+(?:e\s+)?(?:a\s+)?(?:alternativa|assertiva)\b/,
+  /\b(?:resolva|resolver|responda|responder)\s+(?:a\s+)?(?:questao|exercicio)/,
+  /\bgabarito\b/,
+  /\b(?:correct|right|true|wrong|false)\s+(?:answer|option|alternative|choice)/,
+  /\banswer\s+(?:to|for|of)\s+(?:question|exercise)\b/,
+  /\bwhich\s+(?:option|alternative|choice)\s+(?:is|answers)/,
+  /\b(?:solve|answer)\s+(?:question|exercise)\s*\d/,
+  /\banswer\s+key\b/,
+];
+const ANSWER_KEY = /\b(?:gabarito|answer\s+key|respostas?\s+corretas?|resposta\s+certa)\b/;
+
+/**
+ * True when the question asks to choose an exercise's answer and the document
+ * has no answer key of its own (then repeating the key is reading, and allowed).
+ */
+export function asksToChooseAnswer(question: string, documentText: string): boolean {
+  const q = normalize(question);
+  return ASKS_TO_CHOOSE.some((re) => re.test(q)) && !ANSWER_KEY.test(normalize(documentText));
 }
 
 /**
@@ -75,6 +104,12 @@ export function unsupportedJudgement(answer: string, sourceText: string): string
     if (m && !source.includes(m[0].trim())) return m[0].trim();
   }
   return null;
+}
+
+/** One of the strict-mode notices that point the reader to Interpret. */
+export function isInterpretationNotice(answer: string): boolean {
+  const a = answer.trim();
+  return Object.values(NEEDS_INTERPRETATION).some((byLang) => Object.values(byLang).includes(a));
 }
 
 export function isNotFound(answer: string): boolean {

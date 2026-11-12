@@ -137,4 +137,13 @@ describe('UsersService', () => {
       expect(accepted.privacyAcceptedAt).toBeInstanceOf(Date);
     });
   });
+
+  describe('language', () => {
+    it('new accounts get the installation language; users can change theirs', async () => {
+      const created = await users.createFirstAdmin(admin);
+      expect(created.language).toBe('pt');
+      await expect(users.setLanguage('ana@example.com', 'en')).resolves.toMatchObject({ language: 'en' });
+      await expect(users.setLanguage('ana@example.com', 'fr')).rejects.toThrow('Language must be "pt" or "en".');
+    });
+  });
 });

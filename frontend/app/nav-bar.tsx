@@ -2,11 +2,13 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
+import { useI18n } from '@/lib/i18n';
 
 /** Top bar with a back button, shown on every page except the home page. */
 export default function NavBar() {
   const pathname = usePathname();
   const router = useRouter();
+  const { t } = useI18n();
 
   // No back button on the home page or on the screens shown before signing in.
   if (pathname === '/' || pathname === '/login' || pathname === '/setup') return null;
@@ -22,8 +24,8 @@ export default function NavBar() {
 
   return (
     <nav className="nav">
-      <button type="button" onClick={goBack} aria-label="Go back">
-        ← Back
+      <button type="button" onClick={goBack} aria-label={t('common.goBack')}>
+        {t('common.back')}
       </button>
       <Link href="/">Document LLM Analyzer</Link>
     </nav>

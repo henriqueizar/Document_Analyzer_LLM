@@ -4,6 +4,7 @@ import { useSession } from 'next-auth/react';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { apiFetch, errorMessage } from '@/lib/api';
+import { useI18n, type Language } from '@/lib/i18n';
 
 interface User {
   id: string;
@@ -24,6 +25,7 @@ export default function UsersPage() {
   const { data: session, status } = useSession();
   const [users, setUsers] = useState<User[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const { t, server } = useI18n();
 
   const isAdmin = session?.user.role === 'ADMIN';
   useEffect(() => {
@@ -38,20 +40,20 @@ export default function UsersPage() {
     };
   }, [isAdmin]);
 
-  if (status === 'loading') return <p>Loading...</p>;
+  if (status === 'loading') return <p>{t('common.loading')}</p>;
   if (!session) {
     return (
       <div className="centered">
-        <p>You must be logged in.</p>
-        <Link href="/login">Go to login</Link>
+        <p>{t('common.mustLogin')}</p>
+        <Link href="/login">{t('common.goToLogin')}</Link>
       </div>
     );
   }
   if (!isAdmin) {
     return (
       <div className="centered">
-        <p>Only administrators can manage users.</p>
-        <Link href="/">Back to home</Link>
+        <p>{t('users.onlyAdmins')}</p>
+        <Link href="/">{t('common.backHome')}</Link>
       </div>
     );
   }
@@ -60,18 +62,16 @@ export default function UsersPage() {
 
   return (
     <div>
-      <h1>Users</h1>
-      <p>
-        People who can sign in to this installation. Each user only sees their own documents.
-      </p>
+      <h1>{t('users.title')}</h1>
+      <p>{t('users.intro')}</p>
 
-      {error && <p role="alert" className="error">Error: {error}</p>}
-      {!users && !error && <p>Loading...</p>}
+      {error && <p role="alert" className="error">{t('common.error', { message: server(error) })}</p>}
+      {!users && !error && <p>{t('common.loading')}</p>}
       {users?.map((u) => (
         <UserRow key={u.id} user={u} isMe={u.email === session.user.email} onChanged={reload} />
       ))}
 
-      <h2>Add user</h2>
+      <h2>{t('users.add')}</h2>
       <AddUserForm onAdded={reload} />
     </div>
   );
@@ -81,6 +81,7 @@ function UserRow({ user, isMe, onChanged }: { user: User; isMe: boolean; onChang
   const [resetting, setResetting] = useState(false);
   const [password, setPassword] = useState('');
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const { t, server } = useI18n();
 
   async function reset(e: React.FormEvent) {
     e.preventDefault();
@@ -90,12 +91,12 @@ function UserRow({ user, isMe, onChanged }: { user: User; isMe: boolean; onChang
       body: JSON.stringify({ password }),
     });
     if (res.ok) {
-      setMessage({ ok: true, text: `New password set. Give it to ${user.name ?? user.email}.` });
+      setMessage({ ok: true, text: t('users.passwordSet', { name: user.name ?? user.email }) });
       setPassword('');
       setResetting(false);
       onChanged();
     } else {
-      setMessage({ ok: false, text: await errorMessage(res) });
+      setMessage({ ok: false, text: server(await errorMessage(res)) });
     }
   }
 
@@ -103,9 +104,9 @@ function UserRow({ user, isMe, onChanged }: { user: User; isMe: boolean; onChang
     <div className="user-row">
       <div>
         <strong>{user.name ?? user.email}</strong>
-        {isMe && <span className="badge">You</span>}
-        {user.role === 'ADMIN' && <span className="badge">Administrator</span>}
-        {!user.active && <span className="badge badge-warn">No password yet</span>}
+        {isMe && <span className="badge">{t('users.you')}</span>}
+        {user.role === 'ADMIN' && <span className="badge">{t('role.admin')}</span>}
+        {!user.active && <span className="badge badge-warn">{t('users.noPassword')}</span>}
         {user.name && (
           <>
             <br />
@@ -115,22 +116,22 @@ function UserRow({ user, isMe, onChanged }: { user: User; isMe: boolean; onChang
       </div>
       {!isMe && !resetting && (
         <button type="button" onClick={() => setResetting(true)}>
-          {user.active ? 'Reset password' : 'Set password'}
+          {user.active ? t('users.resetPassword') : t('users.setPassword')}
         </button>
       )}
       {resetting && (
         <form onSubmit={reset} className="inline-form">
           <input
             type="password"
-            placeholder="New password (8+ characters)"
+            placeholder={t('users.newPasswordPlaceholder')}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             minLength={8}
             required
             autoFocus
           />
-          <button type="submit">Save</button>
-          <button type="button" onClick={() => setResetting(false)}>Cancel</button>
+          <button type="submit">{t('common.save')}</button>
+          <button type="button" onClick={() => setResetting(false)}>{t('common.cancel')}</button>
         </form>
       )}
       {message && (
@@ -147,6 +148,8 @@ function AddUserForm({ onAdded }: { onAdded: () => void }) {
   const [role, setRole] = useState<'USER' | 'ADMIN'>('USER');
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const { t, server, language: myLanguage } = useI18n();
+  const [language, setLanguage] = useState<Language>(myLanguage);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -155,44 +158,51 @@ function AddUserForm({ onAdded }: { onAdded: () => void }) {
     const res = await apiFetch('/users', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, email, password, role }),
+      body: JSON.stringify({ name, email, password, role, language }),
     });
     setBusy(false);
     if (res.ok) {
-      setMessage({ ok: true, text: `${name} can now sign in with ${email} and the password you chose.` });
+      setMessage({ ok: true, text: t('users.added', { name, email }) });
       setName('');
       setEmail('');
       setPassword('');
       setRole('USER');
       onAdded();
     } else {
-      setMessage({ ok: false, text: await errorMessage(res) });
+      setMessage({ ok: false, text: server(await errorMessage(res)) });
     }
   }
 
   return (
     <form onSubmit={submit} className="form">
       <label>
-        Name
+        {t('common.name')}
         <input value={name} onChange={(e) => setName(e.target.value)} required />
       </label>
       <label>
-        E-mail
+        {t('common.email')}
         <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
       </label>
       <label>
-        Initial password <small>(at least 8 characters; they can change it under Account)</small>
+        {t('users.initialPassword')} <small>{t('users.initialPasswordHint')}</small>
         <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" minLength={8} required />
       </label>
       <label>
-        Role
+        {t('account.role')}
         <select value={role} onChange={(e) => setRole(e.target.value as 'USER' | 'ADMIN')}>
-          <option value="USER">User: uploads and queries their own documents</option>
-          <option value="ADMIN">Administrator: also manages users</option>
+          <option value="USER">{t('users.roleUser')}</option>
+          <option value="ADMIN">{t('users.roleAdmin')}</option>
+        </select>
+      </label>
+      <label>
+        {t('account.language')}
+        <select value={language} onChange={(e) => setLanguage(e.target.value as Language)}>
+          <option value="pt">Português</option>
+          <option value="en">English</option>
         </select>
       </label>
       {message && <p role="alert" className={message.ok ? 'success' : 'error'}>{message.text}</p>}
-      <button type="submit" disabled={busy}>{busy ? 'Adding...' : 'Add user'}</button>
+      <button type="submit" disabled={busy}>{busy ? t('users.adding') : t('users.add')}</button>
     </form>
   );
 }

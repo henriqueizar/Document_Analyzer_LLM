@@ -1,4 +1,4 @@
-import { LlmService } from './llm.service';
+import { LlmService, sameCitationsAndNumbers } from './llm.service';
 
 const ok = (content: string) =>
   new Response(JSON.stringify({ message: { role: 'assistant', content } }), { status: 200 });
@@ -102,13 +102,18 @@ describe('LlmService', () => {
       expect(text).toBe('Não encontrei essa informação no documento.');
     });
 
+    const EXERCISE_NOTICE = 'O documento não diz qual é a resposta correta; isso exigiria interpretação. Marque "Interpretar" abaixo para ver a análise do modelo.';
+    const JUDGEMENT_NOTICE = 'O documento não traz essa avaliação; ela exigiria interpretação. Marque "Interpretar" abaixo para ver a análise do modelo.';
+
     it.each([
-      ['picking an option of an exercise', 'Qual a resposta da questão 3?', 'A resposta da questão 3 é: "B. aviso prévio de 60 dias" [p. 3].'],
+      // the question does not look like an exercise, the answer picks one: caught on the answer side
+      ['picking an option of an exercise', 'E sobre a questão 3?', 'A resposta da questão 3 é: "B. aviso prévio de 60 dias" [p. 3].'],
       ['judging the contract', 'Esse prazo é bom?', 'O prazo de 60 dias é razoável [p. 3].'],
     ])('strict mode: replaces a judgement the document does not make (%s), even when cited', async (_, q, judged) => {
       fetchMock.mockResolvedValue(ok(judged));
       const { text } = await new LlmService().askQuestion(contract, q);
-      expect(text).toBe('Não encontrei essa informação no documento.');
+      // not "not found": the question is in the document; the reader is pointed to Interpret
+      expect(text).toBe(JUDGEMENT_NOTICE);
     });
 
     it('interpretation mode keeps judgements (they are labelled by the app)', async () => {
@@ -119,7 +124,7 @@ describe('LlmService', () => {
 
     it('strict mode: tells the model not to pick exercise answers, judge or chat', async () => {
       fetchMock.mockResolvedValue(ok('x [p. 1].'));
-      await new LlmService().askQuestion(contract, 'Qual a resposta correta da questão 24?');
+      await new LlmService().askQuestion(contract, 'Qual o prazo de aviso prévio?');
       expect(system()).toMatch(/Não escolha a resposta de questões ou exercícios/);
       expect(system()).toMatch(/cumprimentos, conversa e perguntas sobre você/);
     });
@@ -155,6 +160,34 @@ describe('LlmService', () => {
       ]);
       const roles = sent().messages.map((m: { role: string }) => m.role);
       expect(roles).toEqual(['system', 'user', 'assistant', 'user']);
+    });
+
+    it('points exercise-answer questions to Interpret in strict mode without asking the model', async () => {
+      const exam = { name: 'prova.pdf', text: '--- Page 1 ---\nQuestão 2. Dividir as férias em: A) dois períodos B) três períodos' };
+      const { text } = await new LlmService().askQuestion(exam, 'Qual a resposta da questão 2?');
+      expect(text).toBe(EXERCISE_NOTICE);
+      expect(fetchMock).not.toHaveBeenCalled();
+      const { text: english } = await new LlmService().askQuestion(exam, 'What is the correct answer to question 2?', [], 'STRICT', 'en');
+      expect(english).toBe('The document does not say which answer is correct; that would require interpretation. Tick "Interpret" below to see the model\'s analysis.');
+    });
+
+    it('does not send earlier interpretation notices as history either', async () => {
+      fetchMock.mockResolvedValue(ok('Aviso prévio de 60 dias [p. 3].'));
+      await new LlmService().askQuestion(contract, 'Qual o prazo de aviso prévio?', [{ question: 'Esse prazo é bom?', answer: JUDGEMENT_NOTICE }]);
+      expect(sent().messages).toHaveLength(1 + 1);
+    });
+
+    it('does not send earlier refusals, which only lead the model to refuse again', async () => {
+      fetchMock.mockResolvedValue(ok('Aviso prévio de 60 dias [p. 3].'));
+      await new LlmService().askQuestion(contract, 'Qual o prazo de aviso prévio?', [
+        { question: 'você consegue ver o prazo?', answer: 'Não encontrei essa informação no documento.' },
+        { question: 'O que diz a cláusula 3?', answer: 'O valor mensal é de R$ 12.500,00 [p. 2].' },
+      ]);
+      const contents = sent().messages.map((m: { content: string }) => m.content);
+      expect(contents).not.toContain('Não encontrei essa informação no documento.');
+      expect(contents).toContain('O valor mensal é de R$ 12.500,00 [p. 2].');
+      // the refused question still helps to find passages for follow-ups
+      expect(sent().messages).toHaveLength(1 + 2 + 1);
     });
 
     it('sends the whole conversation when it is short', async () => {
@@ -209,6 +242,34 @@ describe('LlmService', () => {
     });
   });
 
+  describe('language of the reply', () => {
+    it('asks again once, with a reminder, when the explanation comes back in English', async () => {
+      fetchMock
+        .mockResolvedValueOnce(ok('This is a cleaning services contract between ACME and Beta, and the monthly amount is R$ 12.500,00 [p. 2].'))
+        .mockResolvedValueOnce(ok('É um contrato de serviços de limpeza entre ACME e Beta, e o valor mensal é de R$ 12.500,00 [p. 2].'));
+      const { text } = await new LlmService().explainDocument(contract);
+      expect(text).toMatch(/^É um contrato de serviços de limpeza/);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(JSON.parse(fetchMock.mock.calls[1][1].body).messages.at(-1).content).toMatch(
+        /IMPORTANTE: escreva toda a resposta em português do Brasil/,
+      );
+    });
+
+    it('does not ask again when the reply is already in the right language', async () => {
+      fetchMock.mockResolvedValue(ok('É um contrato de serviços de limpeza entre ACME e Beta, com valor mensal de R$ 12.500,00 [p. 2].'));
+      await new LlmService().explainDocument(contract);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('answers an English question in English, asking again if needed', async () => {
+      fetchMock
+        .mockResolvedValueOnce(ok('O aviso prévio para rescisão do contrato é de 60 dias, conforme a cláusula oitava [p. 3].'))
+        .mockResolvedValueOnce(ok('The termination notice is 60 days, according to the eighth clause of the contract [p. 3].'));
+      const { text } = await new LlmService().askQuestion(contract, 'What is the termination notice period?');
+      expect(text).toMatch(/^The termination notice is 60 days/);
+    });
+  });
+
   describe('explainDocument', () => {
     it('explains in the document language and removes filler', async () => {
       fetchMock.mockResolvedValue(
@@ -256,5 +317,43 @@ describe('LlmService', () => {
     );
     const { text } = await new LlmService().explainDocument(contract);
     expect(text).toBe('Contrato de prestação de serviços entre ACME Ltda. e Beta S.A [p. 1]. O valor mensal é de R$ 12.500,00 [p. 2].');
+  });
+
+  describe('reader language and translation', () => {
+    it('explains in the reader language even when the document is in another one', async () => {
+      fetchMock.mockResolvedValue(ok('This is a cleaning services contract between ACME and Beta for R$ 12.500,00 a month [p. 2].'));
+      const { text, language } = await new LlmService().explainDocument(contract, 'en');
+      expect(language).toBe('en');
+      expect(system()).toMatch(/You summarize company documents/);
+      expect(text).toMatch(/^This is a cleaning services contract/);
+    });
+
+    it('answers in the reader language, not the language of the question', async () => {
+      fetchMock.mockResolvedValue(ok('O valor mensal é de R$ 12.500,00 [p. 2].'));
+      const { language } = await new LlmService().askQuestion(contract, 'What is the monthly amount?', [], 'STRICT', 'pt');
+      expect(language).toBe('pt');
+      expect(system()).toMatch(/Use SOMENTE as informações/);
+    });
+
+    it('translates keeping citations and numbers, and retries once when they change', async () => {
+      fetchMock
+        .mockResolvedValueOnce(ok('The monthly amount is R$ 15,000.00 [p. 3].'))
+        .mockResolvedValueOnce(ok('The monthly amount is R$ 12,500.00 [p. 2].'));
+      const result = await new LlmService().translate('O valor mensal é de R$ 12.500,00 [p. 2].', 'en');
+      expect(result).toEqual({ text: 'The monthly amount is R$ 12,500.00 [p. 2].', verified: true });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('marks a translation as unverified when citations or numbers keep changing', async () => {
+      fetchMock.mockImplementation(async () => ok('The monthly amount is R$ 15,000.00.'));
+      const result = await new LlmService().translate('O valor mensal é de R$ 12.500,00 [p. 2].', 'en');
+      expect(result.verified).toBe(false);
+    });
+
+    it('compares citations and numbers regardless of number formatting', () => {
+      expect(sameCitationsAndNumbers('R$ 12.500,00 [p. 2]', 'R$ 12,500.00 [p. 2]')).toBe(true);
+      expect(sameCitationsAndNumbers('60 dias [p. 6]', '60 days [p. 5]')).toBe(false);
+      expect(sameCitationsAndNumbers('60 dias [p. 6]', 'sixty days [p. 6]')).toBe(false);
+    });
   });
 });

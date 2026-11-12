@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { apiFetch, errorMessage } from '@/lib/api';
 import { CitedText, type Source } from './citations';
 import LoadingDots from '../../loading-dots';
+import { useI18n } from '@/lib/i18n';
 
 interface Interaction {
   id: string;
@@ -15,6 +16,15 @@ interface Interaction {
   sources: Source[] | null;
   /** STRICT: what the document states. INTERPRETATION: the model's reading, asked for explicitly. */
   mode?: 'STRICT' | 'INTERPRETATION';
+  /** Language the model wrote in (null for older answers). */
+  language?: 'pt' | 'en' | null;
+}
+
+interface Translation {
+  language: 'pt' | 'en';
+  text: string;
+  /** false: the translation changed a number or a page citation. */
+  verified: boolean;
 }
 
 /** The refusal sentences the backend uses (pt / en). */
@@ -61,19 +71,27 @@ function previewKind(name: string): PreviewKind | null {
  * grounding warning ("⚠ ...") when it could not verify part of the text
  * against the document; it is shown apart.
  */
+function splitWarning(text: string) {
+  const at = text.search(/\n*⚠/u);
+  return {
+    body: at === -1 ? text : text.slice(0, at).trimEnd(),
+    warning: at === -1 ? null : text.slice(at).trim(),
+  };
+}
+
 function LlmText({
   label,
+  documentId,
   interaction,
   onShowPage,
 }: {
   label: string;
+  documentId: string;
   interaction: Interaction;
   onShowPage?: (page: number) => void;
 }) {
-  const text = interaction.answer;
-  const at = text.search(/\n*⚠/u);
-  const body = at === -1 ? text : text.slice(0, at).trimEnd();
-  const warning = at === -1 ? null : text.slice(at).trim();
+  const { t, server, language } = useI18n();
+  const { body, warning } = splitWarning(interaction.answer);
   const content = (
     <>
       <CitedText label={label} text={body} sources={interaction.sources} onShowPage={onShowPage} />
@@ -82,15 +100,26 @@ function LlmText({
           {warning}
         </p>
       )}
+      {/* Written in another language (e.g. by the model for someone else): the
+          original stays; a translation is shown below it only when asked for. */}
+      {interaction.language && interaction.language !== language && (
+        <TranslationBox
+          key={language}
+          documentId={documentId}
+          interaction={interaction}
+          to={language}
+          onShowPage={onShowPage}
+          t={t}
+          server={server}
+        />
+      )}
     </>
   );
   if (interaction.mode === 'INTERPRETATION') {
     // The label comes from the application, not from the model.
     return (
-      <div className="interpretation" role="note" aria-label="Interpretation">
-        <p className="interpretation-label">
-          [Interpretation] Not stated in the document: this is the model&apos;s reading. Check the cited passages.
-        </p>
+      <div className="interpretation" role="note" aria-label={t('doc.interpretationLabel')}>
+        <p className="interpretation-label">{t('doc.interpretationLabel')}</p>
         {content}
       </div>
     );
@@ -100,14 +129,94 @@ function LlmText({
       <>
         {content}
         <p className="hint-line">
-          <small>
-            Want the model&apos;s interpretation instead? Tick &quot;Interpret&quot; below and ask again.
-          </small>
+          <small>{t('doc.refusalHint')}</small>
         </p>
       </>
     );
   }
   return content;
+}
+
+/** "View translation": translated once by the local model, then kept. */
+function TranslationBox({
+  documentId,
+  interaction,
+  to,
+  onShowPage,
+  t,
+  server,
+}: {
+  documentId: string;
+  interaction: Interaction;
+  to: 'pt' | 'en';
+  onShowPage?: (page: number) => void;
+  t: ReturnType<typeof useI18n>['t'];
+  server: (message: string) => string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [translation, setTranslation] = useState<Translation | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function toggle() {
+    if (open) {
+      setOpen(false);
+      return;
+    }
+    setOpen(true);
+    if (translation || loading) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await apiFetch(`/documents/${documentId}/interactions/${interaction.id}/translate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to }),
+      });
+      if (!res.ok) throw new Error(await errorMessage(res));
+      setTranslation(await res.json());
+    } catch (e) {
+      setError(e instanceof Error ? server(e.message) : t('common.requestFailed'));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const translated = translation ? splitWarning(translation.text) : null;
+  return (
+    <div className="translation">
+      <button type="button" className="link-button" onClick={toggle} aria-expanded={open}>
+        {open ? t('doc.hideTranslation') : t('doc.viewTranslation')}
+      </button>
+      {open && loading && (
+        <p className="llm-text pending">
+          {t('doc.translating')}
+          <LoadingDots />
+        </p>
+      )}
+      {open && error && (
+        <p role="alert" className="error">{t('common.error', { message: error })}</p>
+      )}
+      {open && translated && translation && (
+        <div className="translation-body" lang={translation.language === 'pt' ? 'pt-BR' : 'en'}>
+          <p className="translation-label">
+            <small>{t('doc.translationLabel')}</small>
+          </p>
+          <CitedText label="" text={translated.body} sources={interaction.sources} onShowPage={onShowPage} />
+          {translated.warning && (
+            <p className="warning" role="note">
+              {translated.warning}
+            </p>
+          )}
+          {!translation.verified && (
+            <p className="warning" role="note">
+              {t('doc.translationUnverified')}
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 /** What is happening with the document right now, and what the user can do. */
@@ -121,40 +230,41 @@ function StatusBox({
   onRetryExplanation: () => void;
 }) {
   const { status, explanationStatus } = document;
+  const { t, server } = useI18n();
   if (status === 'PENDING') {
     return (
       <div className="status">
-        <p>In the queue: this document will be read shortly<LoadingDots /></p>
+        <p>{t('doc.queue')}<LoadingDots /></p>
       </div>
     );
   }
   if (status === 'PROCESSING') {
     return (
       <div className="status">
-        <p>Reading the document (text and OCR)<LoadingDots /></p>
+        <p>{t('doc.reading')}<LoadingDots /></p>
       </div>
     );
   }
   if (status === 'FAILED') {
     return (
       <div className="status">
-        <p>Could not read this document: {document.failureReason ?? 'unknown error.'}</p>
-        <button type="button" onClick={onRetryReading}>Retry</button>
+        <p>{t('doc.readFailed', { reason: document.failureReason ? server(document.failureReason) : t('doc.unknownError') })}</p>
+        <button type="button" onClick={onRetryReading}>{t('doc.retry')}</button>
       </div>
     );
   }
   if (explanationStatus === 'PENDING' || explanationStatus === 'PROCESSING') {
     return (
       <div className="status">
-        <p>Writing the explanation<LoadingDots /> You can already ask questions below.</p>
+        <p>{t('doc.writing')}<LoadingDots /> {t('doc.writingAskNow')}</p>
       </div>
     );
   }
   if (explanationStatus === 'FAILED') {
     return (
       <div className="status">
-        <p>The explanation could not be written: {document.explanationError ?? 'unknown error.'} You can still ask questions.</p>
-        <button type="button" onClick={onRetryExplanation}>Retry explanation</button>
+        <p>{t('doc.explainFailed', { reason: document.explanationError ? server(document.explanationError) : t('doc.unknownError') })}</p>
+        <button type="button" onClick={onRetryExplanation}>{t('doc.retryExplanation')}</button>
       </div>
     );
   }
@@ -183,6 +293,7 @@ export default function DocumentPage() {
   const [interpret, setInterpret] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
+  const { t, server } = useI18n();
 
   // Initial load
   useEffect(() => {
@@ -256,7 +367,7 @@ export default function DocumentPage() {
       if (!res.ok) throw new Error(await errorMessage(res));
       setData(await fetchDocument(id));
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Request failed');
+      setError(e instanceof Error ? server(e.message) : t('common.requestFailed'));
       setQuestion(text); // give the question back so it can be sent again
       setInterpret(wantsInterpretation);
     } finally {
@@ -273,37 +384,29 @@ export default function DocumentPage() {
       if (!res.ok) throw new Error(await errorMessage(res));
       setData(await fetchDocument(id));
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Request failed');
+      setError(e instanceof Error ? server(e.message) : t('common.requestFailed'));
     }
   }
 
   async function deleteDocument() {
-    const name = data?.document.originalName ?? 'this document';
-    if (
-      !window.confirm(
-        `Delete "${name}" permanently?\n\nThe file, the text read from it and all its explanations, questions and answers are erased from this machine. This cannot be undone.`,
-      )
-    ) {
+    const name = data?.document.originalName ?? '';
+    if (!window.confirm(t('doc.deleteConfirm', { name }))) {
       return;
     }
     setError(null);
     const res = await apiFetch(`/documents/${id}`, { method: 'DELETE' });
     if (res.ok) router.replace('/documents');
-    else setError(await errorMessage(res));
+    else setError(server(await errorMessage(res)));
   }
 
   function reprocess() {
-    if (
-      window.confirm(
-        'Read the document and write the explanation again? Your questions and answers are kept.',
-      )
-    ) {
+    if (window.confirm(t('doc.reprocessConfirm'))) {
       queue('process');
     }
   }
 
-  if (error && !data) return <p role="alert">Error: {error}</p>;
-  if (!data) return <p>Loading...</p>;
+  if (error && !data) return <p role="alert">{t('common.error', { message: server(error) })}</p>;
+  if (!data) return <p>{t('common.loading')}</p>;
 
   const { document, interactions } = data;
   const showPage =
@@ -331,13 +434,13 @@ export default function DocumentPage() {
             <button
               type="button"
               onClick={reprocess}
-              title="Read the document and write the explanation again (e.g. after changing the model)"
+              title={t('doc.reprocessTitle')}
             >
-              Reprocess
+              {t('doc.reprocess')}
             </button>
           )}
           <button type="button" className="danger" onClick={deleteDocument}>
-            Delete
+            {t('doc.delete')}
           </button>
         </div>
       )}
@@ -346,7 +449,7 @@ export default function DocumentPage() {
       {previewUrl && kind === 'image' && (
         <div className="preview">
           {/* eslint-disable-next-line @next/next/no-img-element -- blob: URL, not optimizable */}
-          <img src={previewUrl} alt={`Preview of ${document.originalName}`} />
+          <img src={previewUrl} alt={t('doc.preview', { name: document.originalName })} />
         </div>
       )}
       {previewUrl && kind === 'pdf' && (
@@ -355,11 +458,11 @@ export default function DocumentPage() {
             // a new key reloads the viewer so it opens at the requested page
             key={pdfPage ?? 0}
             src={pdfPage ? `${previewUrl}#page=${pdfPage}` : previewUrl}
-            title={`Preview of ${document.originalName}`}
+            title={t('doc.preview', { name: document.originalName })}
           />
           <small>
             <a href={previewUrl} target="_blank" rel="noopener noreferrer">
-              Open the PDF in a new tab
+              {t('doc.openPdf')}
             </a>
           </small>
         </div>
@@ -369,12 +472,12 @@ export default function DocumentPage() {
       {interactions
         .filter((i) => i.role === 'EXPLANATION')
         .map((i) => (
-          <LlmText key={i.id} label="Explanation:" interaction={i} onShowPage={showPage} />
+          <LlmText key={i.id} label={t('doc.explanation')} documentId={id} interaction={i} onShowPage={showPage} />
         ))}
       {!interactions.some((i) => i.role === 'EXPLANATION') && busy && (
         <p className="llm-text pending">
-          <strong>Explanation:</strong>{' '}
-          {ready ? 'Writing the explanation' : 'Reading the document'}
+          <strong>{t('doc.explanation')}</strong>{' '}
+          {ready ? t('doc.writing') : t('doc.readingShort')}
           <LoadingDots />
         </p>
       )}
@@ -382,21 +485,21 @@ export default function DocumentPage() {
       <hr />
 
       {/* Chat: question and answer */}
-      <h2>Chat</h2>
+      <h2>{t('doc.chat')}</h2>
       {ready && questions.length === 0 && !pending && (
-        <small>No questions yet. Ask the first one below.</small>
+        <small>{t('doc.noQuestions')}</small>
       )}
       {questions.map((i) => (
         <div key={i.id}>
-          <p><strong>You:</strong> {i.question}</p>
-          <LlmText label="LLM:" interaction={i} onShowPage={showPage} />
+          <p><strong>{t('doc.you')}</strong> {i.question}</p>
+          <LlmText label={t('doc.llm')} documentId={id} interaction={i} onShowPage={showPage} />
         </div>
       ))}
       {pending && (
         <div>
-          <p><strong>You:</strong> {pending.text}</p>
+          <p><strong>{t('doc.you')}</strong> {pending.text}</p>
           <p className="llm-text pending">
-            <strong>LLM:</strong> {pending.interpret ? 'Interpreting' : 'Thinking'}<LoadingDots />
+            <strong>{t('doc.llm')}</strong> {pending.interpret ? t('doc.interpreting') : t('doc.thinking')}<LoadingDots />
           </p>
         </div>
       )}
@@ -411,21 +514,21 @@ export default function DocumentPage() {
             onChange={(e) => setQuestion(e.target.value)}
             placeholder={
               !ready
-                ? 'Available once the document is read'
+                ? t('doc.placeholderNotReady')
                 : interpret
-                  ? 'Ask for an interpretation (it will be marked as such)...'
-                  : 'Ask something about the document...'
+                  ? t('doc.placeholderInterpret')
+                  : t('doc.placeholder')
             }
             disabled={!ready || asking}
           />
           <button type="submit" disabled={!ready || asking || !question.trim()}>
             {asking ? (
               <>
-                Thinking
+                {t('doc.thinking')}
                 <LoadingDots />
               </>
             ) : (
-              'Send'
+              t('doc.send')
             )}
           </button>
         </form>
@@ -436,10 +539,10 @@ export default function DocumentPage() {
             onChange={(e) => setInterpret(e.target.checked)}
             disabled={!ready || asking}
           />
-          Interpret: let the model analyse beyond what is written (answer marked as interpretation)
+          {t('doc.interpretToggle')}
         </label>
         {error && (
-          <p role="alert" className="error">Error: {error}</p>
+          <p role="alert" className="error">{t('common.error', { message: error })}</p>
         )}
       </div>
     </div>
