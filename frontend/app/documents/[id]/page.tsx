@@ -45,6 +45,8 @@ interface DocumentInfo {
 
 interface DocumentData {
   document: DocumentInfo;
+  /** Shared documents: the caller is not the owner and only reads and asks. */
+  access?: { owner: boolean; ownerName: string | null };
   interactions: Interaction[];
 }
 
@@ -226,8 +228,9 @@ function StatusBox({
   onRetryExplanation,
 }: {
   document: DocumentInfo;
-  onRetryReading: () => void;
-  onRetryExplanation: () => void;
+  /** Absent for people the document was shared with (only the owner can retry). */
+  onRetryReading?: () => void;
+  onRetryExplanation?: () => void;
 }) {
   const { status, explanationStatus } = document;
   const { t, server } = useI18n();
@@ -249,7 +252,7 @@ function StatusBox({
     return (
       <div className="status">
         <p>{t('doc.readFailed', { reason: document.failureReason ? server(document.failureReason) : t('doc.unknownError') })}</p>
-        <button type="button" onClick={onRetryReading}>{t('doc.retry')}</button>
+        {onRetryReading && <button type="button" onClick={onRetryReading}>{t('doc.retry')}</button>}
       </div>
     );
   }
@@ -264,7 +267,9 @@ function StatusBox({
     return (
       <div className="status">
         <p>{t('doc.explainFailed', { reason: document.explanationError ? server(document.explanationError) : t('doc.unknownError') })}</p>
-        <button type="button" onClick={onRetryExplanation}>{t('doc.retryExplanation')}</button>
+        {onRetryExplanation && (
+          <button type="button" onClick={onRetryExplanation}>{t('doc.retryExplanation')}</button>
+        )}
       </div>
     );
   }
@@ -409,6 +414,7 @@ export default function DocumentPage() {
   if (!data) return <p>{t('common.loading')}</p>;
 
   const { document, interactions } = data;
+  const owner = data.access?.owner ?? true;
   const showPage =
     kind === 'pdf' && previewUrl
       ? (page: number) => {
@@ -425,10 +431,16 @@ export default function DocumentPage() {
 
       <StatusBox
         document={document}
-        onRetryReading={() => queue('process')}
-        onRetryExplanation={() => queue('explain')}
+        onRetryReading={owner ? () => queue('process') : undefined}
+        onRetryExplanation={owner ? () => queue('explain') : undefined}
       />
-      {!busy && (
+      {!owner && (
+        <p className="access-line">
+          <small>{t('share.sharedBy', { name: data.access?.ownerName ?? '' })}</small>
+        </p>
+      )}
+      {owner && <SharePanel documentId={id} />}
+      {owner && !busy && (
         <div className="button-row left doc-actions">
           {ready && (
             <button
@@ -545,6 +557,99 @@ export default function DocumentPage() {
           <p role="alert" className="error">{t('common.error', { message: error })}</p>
         )}
       </div>
+    </div>
+  );
+}
+
+interface Shares {
+  sharedWith: { id: string; name: string }[];
+  /** The owner's teams. None: sharing is not offered at all. */
+  teams: { id: string; name: string }[];
+}
+
+/** Owner only: who can see the document, and the choice of teams. */
+function SharePanel({ documentId }: { documentId: string }) {
+  const { t, server } = useI18n();
+  const [shares, setShares] = useState<Shares | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [chosen, setChosen] = useState<Set<string>>(new Set());
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch(`/documents/${documentId}/shares`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((s: Shares | null) => !cancelled && setShares(s))
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [documentId]);
+
+  // Not in any team (e.g. the app is used by one person): nothing to show.
+  if (!shares || shares.teams.length === 0) return null;
+
+  function open() {
+    setChosen(new Set(shares!.sharedWith.map((s) => s.id)));
+    setMessage(null);
+    setEditing(true);
+  }
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    const res = await apiFetch(`/documents/${documentId}/shares`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ teamIds: [...chosen] }),
+    });
+    if (res.ok) {
+      setShares(await res.json());
+      setEditing(false);
+      setMessage({ ok: true, text: t('share.saved') });
+    } else {
+      setMessage({ ok: false, text: server(await errorMessage(res)) });
+    }
+  }
+
+  const names = shares.sharedWith.map((s) => s.name).join(', ');
+  return (
+    <div className="access-line">
+      <small>{names ? t('share.sharedWith', { teams: names }) : t('share.private')}</small>{' '}
+      {!editing && (
+        <button type="button" onClick={open}>
+          {t('share.button')}
+        </button>
+      )}
+      {message && <p role="status" className={message.ok ? 'success' : 'error'}>{message.text}</p>}
+      {editing && (
+        <form onSubmit={save} className="share-panel">
+          <strong>{t('share.title')}</strong>
+          {shares.teams.map((team) => (
+            <label key={team.id}>
+              <input
+                type="checkbox"
+                checked={chosen.has(team.id)}
+                onChange={(e) => {
+                  const next = new Set(chosen);
+                  if (e.target.checked) next.add(team.id);
+                  else next.delete(team.id);
+                  setChosen(next);
+                }}
+              />
+              {team.name}
+            </label>
+          ))}
+          <p>
+            <small className="hint">{t('share.hint')}</small>
+          </p>
+          <div className="button-row left">
+            <button type="submit">{t('common.save')}</button>
+            <button type="button" onClick={() => setEditing(false)}>
+              {t('common.cancel')}
+            </button>
+          </div>
+        </form>
+      )}
     </div>
   );
 }

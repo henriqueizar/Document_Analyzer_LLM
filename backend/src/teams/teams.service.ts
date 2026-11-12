@@ -1,4 +1,9 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -21,7 +26,9 @@ export class TeamsService {
     const teams = await this.prisma.team.findMany({
       orderBy: { name: 'asc' },
       include: {
-        members: { include: { user: { select: { id: true, name: true, email: true } } } },
+        members: {
+          include: { user: { select: { id: true, name: true, email: true } } },
+        },
         _count: { select: { shares: true } },
       },
     });
@@ -48,7 +55,10 @@ export class TeamsService {
   async create(name: unknown) {
     const clean = teamName(name);
     try {
-      return await this.prisma.team.create({ data: { name: clean }, select: { id: true, name: true } });
+      return await this.prisma.team.create({
+        data: { name: clean },
+        select: { id: true, name: true },
+      });
     } catch (error) {
       throw uniqueName(error);
     }
@@ -58,7 +68,11 @@ export class TeamsService {
     const clean = teamName(name);
     await this.find(id);
     try {
-      return await this.prisma.team.update({ where: { id }, data: { name: clean }, select: { id: true, name: true } });
+      return await this.prisma.team.update({
+        where: { id },
+        data: { name: clean },
+        select: { id: true, name: true },
+      });
     } catch (error) {
       throw uniqueName(error);
     }
@@ -72,7 +86,10 @@ export class TeamsService {
 
   async addMember(teamId: string, userId: unknown): Promise<void> {
     await this.find(teamId);
-    if (typeof userId !== 'string' || !(await this.prisma.user.findUnique({ where: { id: userId } }))) {
+    if (
+      typeof userId !== 'string' ||
+      !(await this.prisma.user.findUnique({ where: { id: userId } }))
+    ) {
       throw new NotFoundException('User not found.');
     }
     await this.prisma.teamMember.upsert({
@@ -95,14 +112,21 @@ export class TeamsService {
 }
 
 function teamName(name: unknown): string {
-  const clean = typeof name === 'string' ? name.trim().replace(/\s+/g, ' ') : '';
+  const clean =
+    typeof name === 'string' ? name.trim().replace(/\s+/g, ' ') : '';
   if (!clean) throw new BadRequestException('Enter a team name.');
-  if (clean.length > 60) throw new BadRequestException('The team name must have at most 60 characters.');
+  if (clean.length > 60)
+    throw new BadRequestException(
+      'The team name must have at most 60 characters.',
+    );
   return clean;
 }
 
 function uniqueName(error: unknown): unknown {
-  if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+  if (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    error.code === 'P2002'
+  ) {
     return new ConflictException('A team with this name already exists.');
   }
   return error;

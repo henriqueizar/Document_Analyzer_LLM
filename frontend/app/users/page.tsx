@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { apiFetch, errorMessage } from '@/lib/api';
 import { useI18n, type Language } from '@/lib/i18n';
+import TeamsSection from './teams';
 
 interface User {
   id: string;
@@ -73,6 +74,9 @@ export default function UsersPage() {
 
       <h2>{t('users.add')}</h2>
       <AddUserForm onAdded={reload} />
+
+      <hr />
+      <TeamsSection users={users ?? []} />
     </div>
   );
 }

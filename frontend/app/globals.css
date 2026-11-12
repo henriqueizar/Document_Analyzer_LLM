@@ -540,3 +540,54 @@ button.danger:hover {
   text-transform: uppercase;
   font-size: 0.85em;
 }
+
+/* Teams (Users page) */
+.team {
+  margin: 12px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--ink);
+}
+.team-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.members {
+  margin: 8px 0;
+  padding: 0;
+  list-style: none;
+}
+.members li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 0;
+  border-bottom: 1px dashed var(--ink);
+}
+.members li button {
+  padding: 0 8px;
+}
+.team-create {
+  margin-top: 12px;
+}
+.team-create input {
+  flex: 1;
+}
+
+/* Sharing (document page) */
+.share-panel {
+  margin: 8px 0 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--ink);
+}
+.share-panel label {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.access-line {
+  margin: 4px 0 12px;
+}

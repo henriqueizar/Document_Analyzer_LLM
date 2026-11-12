@@ -75,7 +75,7 @@ const en = {
 
   // users
   'users.title': 'Users',
-  'users.intro': 'People who can sign in to this installation. Each user only sees their own documents.',
+  'users.intro': 'People who can sign in to this installation. Each user sees their own documents and those shared with their teams.',
   'users.onlyAdmins': 'Only administrators can manage users.',
   'users.you': 'You',
   'users.noPassword': 'No password yet',
@@ -165,6 +165,33 @@ const en = {
   'cite.showAll': 'Show all the text the model received from page {page}',
   'cite.showMatching': 'Show only the matching sentence',
   'cite.exact': 'This is the exact text the model received from the document.',
+  // teams (administrators, under Users)
+  'teams.title': 'Teams',
+  'teams.intro': 'Group people (for example, by department) so they can share documents with each other. Until a team exists, nothing about teams is shown to anyone.',
+  'teams.none': 'No teams yet.',
+  'teams.create': 'Create team',
+  'teams.namePlaceholder': 'Team name (e.g. Legal)',
+  'teams.noMembers': 'No members yet.',
+  'teams.addMember': 'Add',
+  'teams.chooseUser': 'Add a person...',
+  'teams.removeMember': 'Remove {name} from the team',
+  'teams.removeConfirm': 'Remove {name} from "{team}"?\n\nThey lose access to the documents shared with this team.',
+  'teams.rename': 'Rename',
+  'teams.delete': 'Delete team',
+  'teams.deleteConfirm': 'Delete the team "{name}"?\n\nIts members lose access to the documents shared with it. The documents stay with their owners.',
+  'teams.sharedCount': 'Documents shared with it: {count}',
+
+  // sharing (document page and list)
+  'share.button': 'Share',
+  'share.title': 'Share with teams',
+  'share.hint': 'Members of the chosen teams see the file and the explanation and ask questions in their own chat. They do not see your questions; only you can reprocess, delete or change the sharing.',
+  'share.private': 'Private: only you can see this document.',
+  'share.sharedWith': 'Shared with: {teams}',
+  'share.saved': 'Sharing updated.',
+  'share.sharedBy': 'Shared by {name}. You see the explanation and your own questions only.',
+  'documents.sharedTitle': 'Shared with me',
+  'documents.sharedEmpty': 'Nothing has been shared with your teams yet.',
+  'documents.sharedBy': 'by {name} · {teams}',
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -225,7 +252,7 @@ const pt: Record<MessageKey, string> = {
   'account.saving': 'Salvando...',
 
   'users.title': 'Usuários',
-  'users.intro': 'Pessoas que podem entrar nesta instalação. Cada usuário vê apenas os próprios documentos.',
+  'users.intro': 'Pessoas que podem entrar nesta instalação. Cada usuário vê os próprios documentos e os compartilhados com as suas equipes.',
   'users.onlyAdmins': 'Apenas administradores podem gerenciar usuários.',
   'users.you': 'Você',
   'users.noPassword': 'Sem senha ainda',
@@ -311,6 +338,31 @@ const pt: Record<MessageKey, string> = {
   'cite.showAll': 'Mostrar todo o texto que o modelo recebeu da página {page}',
   'cite.showMatching': 'Mostrar só a frase correspondente',
   'cite.exact': 'Este é o texto exato que o modelo recebeu do documento.',
+  'teams.title': 'Equipes',
+  'teams.intro': 'Agrupe pessoas (por exemplo, por setor) para que possam compartilhar documentos entre si. Enquanto não houver equipes, nada sobre elas aparece para ninguém.',
+  'teams.none': 'Nenhuma equipe ainda.',
+  'teams.create': 'Criar equipe',
+  'teams.namePlaceholder': 'Nome da equipe (ex.: Jurídico)',
+  'teams.noMembers': 'Sem membros ainda.',
+  'teams.addMember': 'Adicionar',
+  'teams.chooseUser': 'Adicionar uma pessoa...',
+  'teams.removeMember': 'Tirar {name} da equipe',
+  'teams.removeConfirm': 'Tirar {name} de "{team}"?\n\nA pessoa perde o acesso aos documentos compartilhados com esta equipe.',
+  'teams.rename': 'Renomear',
+  'teams.delete': 'Excluir equipe',
+  'teams.deleteConfirm': 'Excluir a equipe "{name}"?\n\nOs membros perdem o acesso aos documentos compartilhados com ela. Os documentos continuam com os donos.',
+  'teams.sharedCount': 'Documentos compartilhados com ela: {count}',
+
+  'share.button': 'Compartilhar',
+  'share.title': 'Compartilhar com equipes',
+  'share.hint': 'Os membros das equipes escolhidas veem o arquivo e a explicação e fazem perguntas no próprio chat. Eles não veem as suas perguntas; só você pode reprocessar, excluir ou mudar o compartilhamento.',
+  'share.private': 'Privado: só você vê este documento.',
+  'share.sharedWith': 'Compartilhado com: {teams}',
+  'share.saved': 'Compartilhamento atualizado.',
+  'share.sharedBy': 'Compartilhado por {name}. Você vê a explicação e somente as suas próprias perguntas.',
+  'documents.sharedTitle': 'Compartilhados comigo',
+  'documents.sharedEmpty': 'Nada foi compartilhado com as suas equipes ainda.',
+  'documents.sharedBy': 'de {name} · {teams}',
 };
 
 const MESSAGES: Record<Language, Record<MessageKey, string>> = { en, pt };
@@ -343,6 +395,11 @@ const SERVER_MESSAGES: { match: string | RegExp; pt: string }[] = [
   { match: /^Unsupported file type: /, pt: 'Tipo de arquivo não suportado.' },
   { match: /^LLM unavailable: /, pt: 'LLM indisponível: ' },
   { match: 'Language must be "pt" or "en".', pt: 'O idioma deve ser "pt" ou "en".' },
+  { match: 'Enter a team name.', pt: 'Digite o nome da equipe.' },
+  { match: 'The team name must have at most 60 characters.', pt: 'O nome da equipe pode ter no máximo 60 caracteres.' },
+  { match: 'A team with this name already exists.', pt: 'Já existe uma equipe com este nome.' },
+  { match: 'Team not found.', pt: 'Equipe não encontrada.' },
+  { match: 'You can only share with teams you belong to.', pt: 'Você só pode compartilhar com equipes das quais participa.' },
 ];
 
 export function translateServerMessage(message: string, language: Language): string {
