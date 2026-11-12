@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 
 /** A document passage sent to the model with an answer (stored by the backend). */
 export interface Source {
@@ -138,6 +138,12 @@ function SourcePanel({
   onClose: () => void;
 }) {
   const [all, setAll] = useState(false);
+  // Bring the source into view: otherwise it may open below the screen and
+  // look like the click did nothing.
+  const panelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    panelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [page, claim]);
   const passages = (sources ?? []).filter((s) => s.page === page).map((s) => ({ ...s, text: unwrap(s.text) }));
   // The excerpt that backs the claim; the rest of the page is one click away.
   const scores = passages.map((p) => bestSentenceScored(p.text, claim)?.score ?? 0);
@@ -145,7 +151,7 @@ function SourcePanel({
   const shown = all ? passages : passages.filter((_, i) => i === primary);
 
   return (
-    <div className="source" role="region" aria-label={`Source, page ${page}`}>
+    <div className="source" role="region" aria-label={`Source, page ${page}`} ref={panelRef}>
       <div className="source-head">
         <span>Source: page {page}</span>
         <span className="button-row">

@@ -459,3 +459,28 @@ button.danger:hover {
   background: var(--error);
   color: var(--paper);
 }
+
+/* Animated "..." (loading-dots.tsx) */
+.dots {
+  display: inline-block;
+  width: 3ch;
+  text-align: left;
+}
+
+/* Chat input fixed at the bottom of the screen (document page) */
+.ask-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  margin-top: 16px;
+  padding: 12px 0 16px;
+  border-top: 1px solid var(--line);
+  background: var(--paper);
+}
+.ask-bar .error {
+  margin: 8px 0 0;
+}
+/* Text that is still being produced */
+.pending {
+  color: var(--muted);
+}

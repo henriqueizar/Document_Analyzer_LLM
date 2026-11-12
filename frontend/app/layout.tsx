@@ -24,7 +24,7 @@ export default function RootLayout({
           <NavBar />
           <main className="page">{children}</main>
           <footer className="footer">
-            Runs entirely on this machine. <Link href="/privacy">Privacy</Link>
+            <Link href="/privacy">This program runs entirely on this machine.</Link>
           </footer>
         </Providers>
       </body>

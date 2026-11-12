@@ -3,8 +3,9 @@
 import { useSession } from 'next-auth/react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { apiFetch, errorMessage } from '@/lib/api';
+import LoadingDots from '../loading-dots';
 
 // Must match backend/src/common/supported-files.ts and the upload size limit.
 const ACCEPT = '.pdf,.png,.jpg,.jpeg,.webp,.bmp,.tif,.tiff';
@@ -37,18 +38,8 @@ export default function UploadPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [docId, setDocId] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
-  const [dots, setDots] = useState('');
 
   const busy = phase !== 'idle';
-
-  useEffect(() => {
-    // "Uploading..." animation
-    if (!busy) return;
-    const interval = setInterval(() => {
-      setDots((prev) => (prev.length < 3 ? prev + '.' : ''));
-    }, 500);
-    return () => clearInterval(interval);
-  }, [busy]);
 
   if (status === 'loading') {
     return <p>Loading session...</p>;
@@ -126,7 +117,7 @@ export default function UploadPage() {
         >
           {file ? 'Change file' : 'Select file'}
         </label>
-        <small>PDF or image, up to 20 MB. You can also drop a file on the button.</small>
+        <small>Choose or drag your PDF/image here (max. 20MB)</small>
 
         <input
           id="file-upload"
@@ -148,11 +139,7 @@ export default function UploadPage() {
 
         <button type="submit" disabled={!file || busy}>
           {label}
-          {busy && (
-            <span style={{ display: 'inline-block', width: '3ch', textAlign: 'left' }}>
-              {dots}
-            </span>
-          )}
+          {busy && <LoadingDots />}
         </button>
         <small>After uploading, the document opens and is read in the background.</small>
       </form>

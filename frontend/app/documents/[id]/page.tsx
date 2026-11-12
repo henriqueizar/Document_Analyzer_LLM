@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { apiFetch, errorMessage } from '@/lib/api';
 import { CitedText, type Source } from './citations';
+import LoadingDots from '../../loading-dots';
 
 interface Interaction {
   id: string;
@@ -92,10 +93,18 @@ function StatusBox({
 }) {
   const { status, explanationStatus } = document;
   if (status === 'PENDING') {
-    return <div className="status"><p>In the queue: this document will be read shortly. This page updates by itself.</p></div>;
+    return (
+      <div className="status">
+        <p>In the queue: this document will be read shortly<LoadingDots /></p>
+      </div>
+    );
   }
   if (status === 'PROCESSING') {
-    return <div className="status"><p>Reading the document (text and OCR)...</p></div>;
+    return (
+      <div className="status">
+        <p>Reading the document (text and OCR)<LoadingDots /></p>
+      </div>
+    );
   }
   if (status === 'FAILED') {
     return (
@@ -108,7 +117,7 @@ function StatusBox({
   if (explanationStatus === 'PENDING' || explanationStatus === 'PROCESSING') {
     return (
       <div className="status">
-        <p>Writing the explanation... You can already ask questions below.</p>
+        <p>Writing the explanation<LoadingDots /> You can already ask questions below.</p>
       </div>
     );
   }
@@ -139,6 +148,9 @@ export default function DocumentPage() {
   const previewRef = useRef<HTMLDivElement>(null);
   const [question, setQuestion] = useState('');
   const [asking, setAsking] = useState(false);
+  /** Question sent and waiting for its answer, shown in the chat right away. */
+  const [pending, setPending] = useState<string | null>(null);
+  const chatEndRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Initial load
@@ -152,6 +164,12 @@ export default function DocumentPage() {
       cancelled = true;
     };
   }, [id]);
+
+  // Like a messaging app: follow the conversation when a question is sent and answered.
+  const answered = data?.interactions.filter((i) => i.role === 'QUESTION').length ?? 0;
+  useEffect(() => {
+    if (pending !== null || asking) chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [pending, asking, answered]);
 
   // Reading and explaining happen in the background: refresh until both are done.
   const busy = data ? inProgress(data.document) : false;
@@ -184,22 +202,26 @@ export default function DocumentPage() {
 
   async function askQuestion(e: React.FormEvent) {
     e.preventDefault();
-    if (!question.trim() || asking) return;
+    const text = question.trim();
+    if (!text || asking) return;
 
     setAsking(true);
     setError(null);
+    setPending(text);
+    setQuestion('');
     try {
       const res = await apiFetch(`/documents/${id}/ask`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question }),
+        body: JSON.stringify({ question: text }),
       });
       if (!res.ok) throw new Error(await errorMessage(res));
       setData(await fetchDocument(id));
-      setQuestion('');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Request failed');
+      setQuestion(text); // give the question back so it can be sent again
     } finally {
+      setPending(null);
       setAsking(false);
     }
   }
@@ -304,18 +326,25 @@ export default function DocumentPage() {
         </div>
       )}
 
-      {/* Explanation */}
+      {/* Explanation (or what is being done to produce it) */}
       {interactions
         .filter((i) => i.role === 'EXPLANATION')
         .map((i) => (
           <LlmText key={i.id} label="Explanation:" interaction={i} onShowPage={showPage} />
         ))}
+      {!interactions.some((i) => i.role === 'EXPLANATION') && busy && (
+        <p className="llm-text pending">
+          <strong>Explanation:</strong>{' '}
+          {ready ? 'Writing the explanation' : 'Reading the document'}
+          <LoadingDots />
+        </p>
+      )}
 
       <hr />
 
       {/* Chat: question and answer */}
       <h2>Chat</h2>
-      {ready && questions.length === 0 && (
+      {ready && questions.length === 0 && !pending && (
         <small>No questions yet. Ask the first one below.</small>
       )}
       {questions.map((i) => (
@@ -324,26 +353,42 @@ export default function DocumentPage() {
           <LlmText label="LLM:" interaction={i} onShowPage={showPage} />
         </div>
       ))}
-
-      <hr />
-
-      {/* Input: Enter sends */}
-      <form onSubmit={askQuestion} className="ask-form">
-        <input
-          value={question}
-          onChange={(e) => setQuestion(e.target.value)}
-          placeholder={
-            ready ? 'Ask something about the document...' : 'Available once the document is processed'
-          }
-          disabled={!ready || asking}
-        />
-        <button type="submit" disabled={!ready || asking || !question.trim()}>
-          {asking ? 'Thinking...' : 'Send'}
-        </button>
-      </form>
-      {error && (
-        <p role="alert" className="error">Error: {error}</p>
+      {pending && (
+        <div>
+          <p><strong>You:</strong> {pending}</p>
+          <p className="llm-text pending">
+            <strong>LLM:</strong> Thinking<LoadingDots />
+          </p>
+        </div>
       )}
+      <div ref={chatEndRef} />
+
+      {/* Input, fixed at the bottom of the screen like a messaging app. Enter sends. */}
+      <div className="ask-bar">
+        <form onSubmit={askQuestion} className="ask-form">
+          <input
+            value={question}
+            onChange={(e) => setQuestion(e.target.value)}
+            placeholder={
+              ready ? 'Ask something about the document...' : 'Available once the document is read'
+            }
+            disabled={!ready || asking}
+          />
+          <button type="submit" disabled={!ready || asking || !question.trim()}>
+            {asking ? (
+              <>
+                Thinking
+                <LoadingDots />
+              </>
+            ) : (
+              'Send'
+            )}
+          </button>
+        </form>
+        {error && (
+          <p role="alert" className="error">Error: {error}</p>
+        )}
+      </div>
     </div>
   );
 }
