@@ -21,11 +21,15 @@ A **instalação** usa a internet uma vez: pacotes npm, imagens Docker e o model
 
 | Dado | Origem | Onde fica | Quem acessa |
 | --- | --- | --- | --- |
-| Arquivos enviados (PDF, imagens) | Upload do usuário | Pasta `backend/uploads/` (disco local) | Somente o dono do documento, pela rota autenticada `GET /documents/:id/file` |
-| Texto extraído (OCR / camada de texto) | Processamento local | PostgreSQL local (`Document.extractedText`) | Somente o dono |
-| Perguntas, respostas e explicações, com os trechos do documento usados como fonte | Usuário / LLM local | PostgreSQL local (`LlmInteraction`) | Somente o dono |
+| Arquivos enviados (PDF, imagens) | Upload do usuário | Pasta `backend/uploads/` (disco local) | O dono do documento e, se ele compartilhar, os membros das equipes escolhidas, pela rota autenticada `GET /documents/:id/file` |
+| Texto extraído (OCR / camada de texto) | Processamento local | PostgreSQL local (`Document.extractedText`) | Ninguém o vê diretamente; é usado pela LLM local para quem tem acesso ao documento |
+| Explicação automática, com os trechos usados como fonte | LLM local | PostgreSQL local (`LlmInteraction`, papel `EXPLANATION`) | Quem tem acesso ao documento |
+| Perguntas e respostas, com os trechos usados como fonte | Usuário / LLM local | PostgreSQL local (`LlmInteraction`, com o autor em `userId`) | **Somente quem perguntou**, também em documentos compartilhados (nem o dono vê as perguntas dos outros) |
+| Equipes e membros | Administrador | PostgreSQL local (`Team`, `TeamMember`) | O administrador; cada pessoa vê as equipes de que participa |
+| Compartilhamentos (documento ↔ equipe) | Dono do documento | PostgreSQL local (`DocumentShare`) | O dono; os membros veem o nome da própria equipe. No painel, o administrador vê o **nome, o dono, a data e o status** dos documentos compartilhados com cada equipe, e pode remover um compartilhamento; nunca vê o conteúdo, as perguntas ou as respostas. De documentos privados, vê só quantos cada pessoa tem |
 | Nome, e-mail e papel do usuário | Cadastro feito pelo administrador (ou configuração inicial) | PostgreSQL local (`User`) e cookie de sessão | O próprio usuário; o administrador vê a lista de usuários |
 | Senha | Usuário | PostgreSQL local, **somente o hash scrypt com sal** (a senha nunca é armazenada) | Ninguém |
+| Registro de atividades: quem, ação, documento ou conta, data e hora (logins, tentativas falhas, uploads, aberturas, perguntas, compartilhamentos, ações do administrador) | Aplicação | PostgreSQL local (`AuditEvent`) | O administrador, no painel. **Nunca contém o texto de perguntas, respostas ou documentos**; de uma pergunta, só que ela foi feita e em que modo |
 
 Documentos empresariais frequentemente contêm dados pessoais de terceiros (nomes, CPF,
 endereços, salários). Eles ficam nos mesmos lugares acima.
@@ -52,14 +56,30 @@ Ollama podem verificar atualizações por conta própria.
 - Login local: senhas com hash scrypt e sal aleatório; bloqueio de 15 minutos após
   5 tentativas erradas; sessão de 12 horas; conta removida ou com papel alterado perde o
   acesso imediatamente.
-- Autenticação em todas as rotas de documentos; cada usuário só acessa os próprios
-  documentos (um documento de outra pessoa responde 404, igual a um inexistente).
+- Autenticação em todas as rotas de documentos. Cada documento é **privado por padrão**:
+  só o dono o acessa, até compartilhá-lo com equipes de que participa (acesso mínimo
+  necessário, art. 6º, III). Membros das equipes leem e perguntam, mas só o dono
+  reprocessa, exclui ou muda o compartilhamento. Qualquer outra pessoa, inclusive o
+  administrador, recebe 404, igual a um documento inexistente.
+- O acesso compartilhado termina quando a pessoa sai da equipe, quando o dono desfaz o
+  compartilhamento ou quando a equipe é excluída. Com o documento compartilhado de novo,
+  as perguntas que a pessoa já tinha feito voltam a aparecer para ela; ao excluir o
+  documento, todas são apagadas.
 - Arquivos enviados não são públicos (não há servidor de arquivos estático).
 - Exclusão de documentos (direito de eliminação, art. 18): o botão "Delete" apaga o
   arquivo do disco, o texto extraído e todas as explicações, perguntas e respostas
   (inclusive os trechos guardados como fonte das citações). Não há cópia de segurança
   automática: o dado deixa de existir na aplicação. Backups feitos pela organização
   (do disco ou do banco) precisam seguir a mesma política.
+- Exclusão de contas (art. 18): o administrador escolhe entre apagar os documentos da
+  pessoa ou transferi-los para outra, e confirma com a própria senha. As perguntas e
+  respostas da pessoa são sempre apagadas, inclusive em documentos compartilhados com
+  ela; a participação em equipes termina com a conta; a sessão aberta no navegador é
+  encerrada na próxima ação. Não é possível excluir a própria conta nem o último
+  administrador.
+- Registro de atividades (art. 37), só com metadados. Abrir o mesmo documento de novo
+  conta uma vez a cada 10 minutos. O registro guarda o e-mail como texto, então
+  sobrevive à exclusão da conta: depois dela, o e-mail continua no histórico.
 - CORS restrito à origem do frontend.
 - Banco e LLM acessíveis apenas em `127.0.0.1` no `docker-compose.yml`.
 - Respostas da LLM restritas ao conteúdo do documento, com citação de página e checagem
@@ -67,9 +87,17 @@ Ollama podem verificar atualizações por conta própria.
 
 ## O que ainda falta
 
-- Exclusão de contas de usuário (com seus documentos) pelo administrador.
-- Registro de auditoria: quem acessou ou perguntou o quê (registro das operações, art. 37).
-- Permissões por equipe (acesso mínimo necessário).
+- Política de retenção do registro de atividades: hoje ele é mantido sem prazo. A
+  organização deve definir por quanto tempo guardá-lo (inclusive o e-mail de contas
+  excluídas).
+- O nome de um arquivo pode, por si só, revelar dado pessoal (por exemplo,
+  "advertência_joão.pdf"). O administrador vê os nomes dos documentos compartilhados com
+  equipes; quem compartilha deve dar nomes neutros a arquivos sensíveis.
+- O administrador controla quem está em cada equipe. Portanto, pode se incluir numa
+  equipe e passar a ver os documentos compartilhados com ela. Isso é inerente a qualquer
+  modelo em que alguém gerencia os grupos. Cada mudança de membros fica no registro de
+  atividades, assim como cada abertura de documento; o administrador não tem como apagar
+  registros pela aplicação (só com acesso direto ao banco).
 - Política de retenção e detecção de dados sensíveis.
 - A tela de configuração inicial fica aberta até o administrador ser criado: faça a
   configuração logo após instalar, antes de expor a aplicação na rede.

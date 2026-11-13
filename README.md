@@ -154,12 +154,12 @@ testes e detalhes de arquitetura, veja [`docs/desenvolvimento.md`](docs/desenvol
 - [x] Modo estrito e modo de interpretação explícito
 - [x] Contas locais (sem login externo), administrador e usuários
 - [x] Interface e respostas em português e inglês, com tradução sob demanda
-- [ ] Equipes e compartilhamento entre setores (invisível para quem usa sozinho)
-- [ ] Painel do administrador: equipes e saúde do sistema, sem acesso ao conteúdo
+- [x] Equipes e compartilhamento entre setores, com chat próprio para cada pessoa (invisível para quem usa sozinho)
+- [x] Painel do administrador: saúde do sistema (banco, Ollama e modelo, fila, falhas, disco), equipes e compartilhamentos, sem acesso ao conteúdo
 - [ ] Busca entre documentos ("onde está o contrato em que o cliente ofereceu X reais?"),
       com a evidência de cada resultado e "nenhum documento" quando for o caso
 - [ ] Dados de demonstração por comando explícito (nunca numa instalação real)
-- [ ] Exclusão de conta com transferência de documentos e log de auditoria (só metadados)
+- [x] Exclusão de conta (apagar ou transferir os documentos, com a senha do administrador) e registro de atividades (só metadados)
 
 ## Tecnologias
 

@@ -79,8 +79,28 @@ Local accounts only; no external identity provider.
   issues a short-lived (5 min) token signed with `BACKEND_JWT_SECRET`. The browser
   sends it to the backend as `Authorization: Bearer <token>`.
 - The backend verifies the token and looks the account up on every request (a removed
-  account or a changed role takes effect immediately), and only ever returns the
-  caller's own documents (another user's document is a 404).
+  account or a changed role takes effect immediately). A document is returned to its
+  owner and, once shared, to members of the chosen teams; anyone else gets a 404.
+- **Teams and sharing:** administrators create teams and manage members (`/teams`).
+  Owners share a document with teams they belong to (`PUT /documents/:id/shares`).
+  Members see the file and the explanation and have their own chat
+  (`LlmInteraction.userId`); only the owner reprocesses, deletes or changes the sharing.
+  Without teams, nothing about sharing is shown.
+- **Admin panel** (`GET /admin/overview`, administrators only): database and Ollama
+  health (is the configured model installed?), processing queue, failures, disk usage;
+  teams with the names, owners, dates and status of the documents shared with them
+  (removable); documents per person as a count. Never content, questions or answers.
+- **Account deletion** (`DELETE /users/:id`, administrators, with their own password):
+  the person's documents are deleted or transferred; their own questions are always
+  deleted; you cannot delete yourself or the last administrator. A deleted account's
+  browser session ends on its next request (any 401 signs out).
+- **Activity log** (`AuditEvent`, `GET /admin/audit?actor=&action=&limit=`): who, action,
+  document or account, time, small details (question mode, teams); never question,
+  answer or document text. Repeated views of a document count once per 10 minutes.
+  Recording never fails the action it records.
+- The e2e tests share the development database and remove everything they create when
+  they finish (users on example.com with a run timestamp, their documents and files, and
+  the teams named after the run), including leftovers of earlier runs.
 - Uploaded files are not public: they are served by `GET /documents/:id/file` to their
   owner only.
 

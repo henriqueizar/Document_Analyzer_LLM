@@ -7,6 +7,7 @@ import {
   HttpCode,
   Param,
   Post,
+  Put,
   StreamableFile,
   UploadedFile,
   UseGuards,
@@ -92,7 +93,7 @@ export class DocumentsController {
     @CurrentUser() user: AuthUser,
   ) {
     // interpretation only when explicitly requested; answers in the user's language
-    return this.documentsService.ask(id, question, user.email, interpret === true, user.language);
+    return this.documentsService.ask(id, question, user.email, interpret === true, user.language, user.id);
   }
 
   /** Authenticated replacement for the old public /uploads static route. */
@@ -117,11 +118,29 @@ export class DocumentsController {
     return this.documentsService.translate(id, interactionId, user.email, to);
   }
 
+  /** Teams the document is shared with, and the owner's teams (owner only). */
+  @Get(':id/shares')
+  shares(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.documentsService.shares(id, user.email);
+  }
+
+  /** Shares the document with these teams; [] makes it private again (owner only). */
+  @Put(':id/shares')
+  setShares(@Param('id') id: string, @Body('teamIds') teamIds: unknown, @CurrentUser() user: AuthUser) {
+    return this.documentsService.setShares(id, user.email, teamIds);
+  }
+
   /** Permanently deletes the document, its file and all its interactions. */
   @Delete(':id')
   @HttpCode(204)
   async remove(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     await this.documentsService.remove(id, user.email);
+  }
+
+  /** Documents shared with the caller's teams by other people. */
+  @Get('shared')
+  async shared(@CurrentUser() user: AuthUser) {
+    return this.documentsService.findSharedWith(user.email);
   }
 
   @Get(':id')

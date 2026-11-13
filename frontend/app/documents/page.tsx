@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useSession } from 'next-auth/react';
 import { apiFetch, errorMessage } from '@/lib/api';
 import { useI18n, type MessageKey } from '@/lib/i18n';
+import { useMyTeams } from '@/lib/teams';
 
 type Status = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
 
@@ -14,6 +15,10 @@ interface DocumentSummary {
   status: Status;
   explanationStatus: Status | null;
   createdAt: string;
+  /** Own documents: teams it is shared with. Shared documents: the caller's teams. */
+  shares?: { team: { name: string } }[];
+  /** Shared documents: the owner. */
+  user?: { name: string | null; email: string };
 }
 
 function statusLabel(d: DocumentSummary): MessageKey {
@@ -31,8 +36,8 @@ const inProgress = (d: DocumentSummary) =>
   d.explanationStatus === 'PENDING' ||
   d.explanationStatus === 'PROCESSING';
 
-async function fetchDocuments(): Promise<DocumentSummary[]> {
-  const res = await apiFetch('/documents');
+async function fetchDocuments(path = '/documents'): Promise<DocumentSummary[]> {
+  const res = await apiFetch(path);
   if (!res.ok) throw new Error(await errorMessage(res));
   return res.json();
 }
@@ -42,8 +47,23 @@ export default function DocumentsListPage() {
   const [docs, setDocs] = useState<DocumentSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const { t, server, language } = useI18n();
+  const [shared, setShared] = useState<DocumentSummary[] | null>(null);
 
   const email = session?.user?.email;
+  // Sharing exists only for people in a team; otherwise nothing about it is shown.
+  const teams = useMyTeams(email);
+  const inTeams = (teams?.length ?? 0) > 0;
+  useEffect(() => {
+    if (!inTeams) return;
+    let cancelled = false;
+    fetchDocuments('/documents/shared').then(
+      (list) => !cancelled && setShared(list),
+      () => !cancelled && setShared([]),
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [inTeams]);
   useEffect(() => {
     if (!email) return;
     let cancelled = false;
@@ -57,13 +77,17 @@ export default function DocumentsListPage() {
   }, [email]);
 
   // Documents are processed in the background: refresh while any is in progress.
-  const busy = docs?.some(inProgress) ?? false;
+  const busy = (docs?.some(inProgress) || shared?.some(inProgress)) ?? false;
   useEffect(() => {
     if (!busy) return;
-    const interval = setInterval(() => fetchDocuments().then(setDocs, () => undefined), 3000);
+    const interval = setInterval(() => {
+      fetchDocuments().then(setDocs, () => undefined);
+      if (inTeams) fetchDocuments('/documents/shared').then(setShared, () => undefined);
+    }, 3000);
     return () => clearInterval(interval);
-  }, [busy]);
+  }, [busy, inTeams]);
 
+  const locale = language === 'pt' ? 'pt-BR' : 'en';
   if (status === 'loading') return <p>{t('common.loadingSession')}</p>;
   if (!session) {
     return (
@@ -93,9 +117,32 @@ export default function DocumentsListPage() {
         <Link key={doc.id} href={`/documents/${doc.id}`} className="doc-item">
           <strong>{doc.originalName}</strong>
           <span>{t(statusLabel(doc))}</span>
-          <small>{new Date(doc.createdAt).toLocaleString(language === 'pt' ? 'pt-BR' : 'en')}</small>
+          <small>
+            {new Date(doc.createdAt).toLocaleString(locale)}
+            {doc.shares?.length ? ` · ${t('share.sharedWith', { teams: teamNames(doc) })}` : ''}
+          </small>
         </Link>
       ))}
+
+      {inTeams && (
+        <>
+          <h2>{t('documents.sharedTitle')}</h2>
+          {shared?.length === 0 && <p>{t('documents.sharedEmpty')}</p>}
+          {shared?.map((doc) => (
+            <Link key={doc.id} href={`/documents/${doc.id}`} className="doc-item">
+              <strong>{doc.originalName}</strong>
+              <span>{t(statusLabel(doc))}</span>
+              <small>
+                {t('documents.sharedBy', { name: doc.user?.name ?? doc.user?.email ?? '', teams: teamNames(doc) })}
+                {' · '}
+                {new Date(doc.createdAt).toLocaleString(locale)}
+              </small>
+            </Link>
+          ))}
+        </>
+      )}
     </div>
   );
 }
+
+const teamNames = (d: DocumentSummary) => (d.shares ?? []).map((s) => s.team.name).join(', ');

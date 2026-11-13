@@ -85,3 +85,28 @@ describe('stripThinking', () => {
     expect(stripThinking('plain')).toBe('plain');
   });
 });
+
+describe('OllamaClient.status (admin health view)', () => {
+  const client = (model: string) =>
+    new OllamaClient({ baseUrl: 'http://localhost:11434', model, numCtx: 8192, timeoutMs: 1000 });
+
+  afterEach(() => jest.restoreAllMocks());
+
+  it('reports whether the configured model is installed', async () => {
+    jest
+      .spyOn(global, 'fetch')
+      .mockImplementation(async () => new Response(JSON.stringify({ models: [{ name: 'qwen3:8b' }, { name: 'gemma3:latest' }] })));
+    expect(await client('qwen3:8b').status()).toEqual({ reachable: true, modelInstalled: true });
+    expect(await client('gemma3').status()).toEqual({ reachable: true, modelInstalled: true });
+    expect(await client('llama3:8b').status()).toEqual({ reachable: true, modelInstalled: false });
+  });
+
+  it('reports Ollama as unreachable instead of throwing', async () => {
+    jest.spyOn(global, 'fetch').mockRejectedValue(new Error('connect ECONNREFUSED'));
+    expect(await client('qwen3:8b').status()).toEqual({
+      reachable: false,
+      modelInstalled: false,
+      error: 'connect ECONNREFUSED',
+    });
+  });
+});

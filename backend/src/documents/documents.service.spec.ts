@@ -8,6 +8,7 @@ import { join } from 'path';
 import { PrismaService } from '../prisma/prisma.service';
 import { ProcessingService } from './processing.service';
 import { LlmService } from '../llm/llm.service';
+import { AuditService } from '../audit/audit.service';
 
 const OWNER = 'alice@example.com';
 
@@ -61,6 +62,7 @@ describe('DocumentsService', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: ProcessingService, useValue: processing },
         { provide: LlmService, useValue: llm },
+        { provide: AuditService, useValue: { record: jest.fn() } },
       ],
     }).compile();
     service = module.get(DocumentsService);
@@ -111,12 +113,26 @@ describe('DocumentsService', () => {
   });
 
   describe('ownership', () => {
-    it('only looks documents up among the caller\'s own', async () => {
+    it('reads only documents the caller owns or that are shared with one of their teams', async () => {
       await build('a.png', { status: 'COMPLETED', extractedText: 'text' });
       await service.findOne('doc-1', OWNER);
-      expect(prisma.document.findFirst).toHaveBeenCalledWith({
-        where: { id: 'doc-1', user: { email: OWNER } },
-      });
+      expect(prisma.document.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            id: 'doc-1',
+            OR: [
+              { user: { email: OWNER } },
+              { shares: { some: { team: { members: { some: { user: { email: OWNER } } } } } } },
+            ],
+          },
+        }),
+      );
+    });
+
+    it('changes (reprocess, delete) only documents the caller owns', async () => {
+      await build('a.png', { status: 'COMPLETED', extractedText: 'text' });
+      await service.process('doc-1', OWNER);
+      expect(prisma.document.findFirst).toHaveBeenCalledWith({ where: { id: 'doc-1', user: { email: OWNER } } });
     });
 
     it('answers 404 (not 403) for another user\'s document', async () => {
@@ -192,7 +208,8 @@ describe('DocumentsService', () => {
     ]);
     await service.ask('doc-1', 'q3', OWNER);
     expect(prisma.llmInteraction.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { documentId: 'doc-1', role: 'QUESTION' }, take: 50 }),
+      // only the caller's own questions: chats are per person, also on shared documents
+      expect.objectContaining({ where: { documentId: 'doc-1', role: 'QUESTION', user: { email: OWNER } }, take: 50 }),
     );
     expect(llm.askQuestion).toHaveBeenCalledWith(
       expect.anything(),

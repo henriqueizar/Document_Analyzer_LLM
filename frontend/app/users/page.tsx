@@ -13,6 +13,8 @@ interface User {
   role: 'ADMIN' | 'USER';
   createdAt: string;
   active: boolean;
+  /** How many documents the person owns. */
+  documents: number;
 }
 
 async function fetchUsers(): Promise<User[]> {
@@ -26,6 +28,8 @@ export default function UsersPage() {
   const [users, setUsers] = useState<User[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const { t, server } = useI18n();
+  /** Shown above the list: the deleted account's row is gone. */
+  const [deleted, setDeleted] = useState<string | null>(null);
 
   const isAdmin = session?.user.role === 'ADMIN';
   useEffect(() => {
@@ -65,20 +69,46 @@ export default function UsersPage() {
       <h1>{t('users.title')}</h1>
       <p>{t('users.intro')}</p>
 
+      {deleted && <p role="status" className="success">{deleted}</p>}
       {error && <p role="alert" className="error">{t('common.error', { message: server(error) })}</p>}
       {!users && !error && <p>{t('common.loading')}</p>}
       {users?.map((u) => (
-        <UserRow key={u.id} user={u} isMe={u.email === session.user.email} onChanged={reload} />
+        <UserRow
+          key={u.id}
+          user={u}
+          others={users.filter((o) => o.id !== u.id && o.active)}
+          isMe={u.email === session.user.email}
+          onChanged={reload}
+          onDeleted={(text) => {
+            setDeleted(text);
+            reload();
+          }}
+        />
       ))}
 
       <h2>{t('users.add')}</h2>
       <AddUserForm onAdded={reload} />
+
     </div>
   );
 }
 
-function UserRow({ user, isMe, onChanged }: { user: User; isMe: boolean; onChanged: () => void }) {
+function UserRow({
+  user,
+  others,
+  isMe,
+  onChanged,
+  onDeleted,
+}: {
+  user: User;
+  /** Who can receive the documents of a deleted account. */
+  others: User[];
+  isMe: boolean;
+  onChanged: () => void;
+  onDeleted: (message: string) => void;
+}) {
   const [resetting, setResetting] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [password, setPassword] = useState('');
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const { t, server } = useI18n();
@@ -114,10 +144,23 @@ function UserRow({ user, isMe, onChanged }: { user: User; isMe: boolean; onChang
           </>
         )}
       </div>
-      {!isMe && !resetting && (
-        <button type="button" onClick={() => setResetting(true)}>
-          {user.active ? t('users.resetPassword') : t('users.setPassword')}
-        </button>
+      {!isMe && !resetting && !deleting && (
+        <span className="button-row">
+          <button type="button" onClick={() => setResetting(true)}>
+            {user.active ? t('users.resetPassword') : t('users.setPassword')}
+          </button>
+          <button type="button" className="danger" onClick={() => setDeleting(true)}>
+            {t('users.delete')}
+          </button>
+        </span>
+      )}
+      {deleting && (
+        <DeleteAccount
+          user={user}
+          others={others}
+          onCancel={() => setDeleting(false)}
+          onDeleted={onDeleted}
+        />
       )}
       {resetting && (
         <form onSubmit={reset} className="inline-form">
@@ -203,6 +246,95 @@ function AddUserForm({ onAdded }: { onAdded: () => void }) {
       </label>
       {message && <p role="alert" className={message.ok ? 'success' : 'error'}>{message.text}</p>}
       <button type="submit" disabled={busy}>{busy ? t('users.adding') : t('users.add')}</button>
+    </form>
+  );
+}
+
+/**
+ * Deleting an account: the administrator chooses what happens to the person's
+ * documents and confirms with their own password.
+ */
+function DeleteAccount({
+  user,
+  others,
+  onCancel,
+  onDeleted,
+}: {
+  user: User;
+  others: User[];
+  onCancel: () => void;
+  onDeleted: (message: string) => void;
+}) {
+  const { t, server } = useI18n();
+  const [mode, setMode] = useState<'delete' | 'transfer'>(user.documents ? 'transfer' : 'delete');
+  const [transferTo, setTransferTo] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const name = user.name ?? user.email;
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    const res = await apiFetch(`/users/${user.id}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ adminPassword: password, documents: mode, transferTo: mode === 'transfer' ? transferTo : undefined }),
+    });
+    setBusy(false);
+    if (res.ok) {
+      const result: { documents: number; mode: 'delete' | 'transfer' } = await res.json();
+      const docs = result.documents
+        ? ' ' + t(result.mode === 'delete' ? 'users.deletedDocs' : 'users.transferredDocs', { count: result.documents })
+        : '';
+      onDeleted(t('users.deleted', { name }) + docs);
+    } else {
+      setError(server(await errorMessage(res)));
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="form delete-account">
+      <strong>{t('users.deleteTitle', { name })}</strong>
+      {user.documents > 0 && (
+        <fieldset>
+          <legend>{t('users.deleteDocs', { count: user.documents })}</legend>
+          <label className="radio">
+            <input type="radio" name={`mode-${user.id}`} checked={mode === 'transfer'} onChange={() => setMode('transfer')} />
+            {t('users.deleteDocsTransfer')}
+          </label>
+          {mode === 'transfer' && (
+            <select value={transferTo} onChange={(e) => setTransferTo(e.target.value)} required aria-label={t('users.deleteDocsTransfer')}>
+              <option value="">{t('users.deleteChoose')}</option>
+              {others.map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.name ?? o.email}
+                  {o.name ? ` (${o.email})` : ''}
+                </option>
+              ))}
+            </select>
+          )}
+          <label className="radio">
+            <input type="radio" name={`mode-${user.id}`} checked={mode === 'delete'} onChange={() => setMode('delete')} />
+            {t('users.deleteDocsDelete')}
+          </label>
+        </fieldset>
+      )}
+      <small className="hint">{t('users.deleteNote')}</small>
+      <label>
+        {t('users.adminPassword')}
+        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required autoFocus />
+      </label>
+      {error && <p role="alert" className="error">{error}</p>}
+      <div className="button-row left">
+        <button type="submit" className="danger" disabled={busy}>
+          {t('users.delete')}
+        </button>
+        <button type="button" onClick={onCancel}>
+          {t('common.cancel')}
+        </button>
+      </div>
     </form>
   );
 }
