@@ -16,7 +16,77 @@ cada informação.
 - **Português e inglês:** a interface, as explicações e as respostas seguem o idioma de
   cada usuário. Respostas em outro idioma mantêm o original e oferecem "Ver tradução".
 
-> Status: em desenvolvimento ativo. Veja o [roteiro](#roteiro).
+> **Versão 1.0.** Pronta para uso pessoal e em empresas. A próxima versão traz a busca
+> entre documentos (veja o [roteiro](#roteiro)).
+
+## Instalação
+
+Precisa só do [Docker](https://docs.docker.com/get-docker/) (no Mac, também do app do
+[Ollama](https://ollama.com), para usar a GPU da Apple). Em um terminal:
+
+```bash
+git clone https://github.com/henriqueizar/Document_Analyzer_LLM
+```
+
+```bash
+cd Document_Analyzer_LLM/deploy && ./install.sh
+```
+
+O instalador faz três perguntas (o endereço de acesso, onde roda a LLM e o modelo), gera
+todas as senhas, baixa o modelo e sobe o aplicativo. No fim, mostra o endereço e um
+**código de instalação**: abra o endereço e crie a conta de administrador com ele. Usando
+sozinho, essa é a sua conta; numa empresa, o administrador cadastra as outras pessoas.
+
+A instalação já vem com HTTPS local, reinício automático, **backup diário automático**,
+rede sem saída para a internet e um comando para recuperar a senha do administrador.
+Passo a passo, certificado, backup, atualização e problemas comuns:
+[`docs/implantacao.md`](docs/implantacao.md).
+
+### Onde foi testado
+
+| Sistema | LLM | Situação |
+| --- | --- | --- |
+| macOS | Ollama nativo (GPU da Apple) | **Testado** pelo autor: instalação, HTTPS, perguntas respondidas |
+| Linux | Ollama nativo | **Testado** em ambiente automatizado, com um substituto da LLM: instalação limpa, fluxo completo, isolamento de rede, recuperação após falha e reinício, backup e restauração |
+| Linux com GPU NVIDIA | Ollama no Docker (`gpu`) | **Não testado** (sem GPU disponível); a configuração segue a documentação do Docker e do Ollama |
+| Qualquer sistema, só CPU | Ollama no Docker (`cpu`) | **Não testado** com um modelo real |
+| Windows | — | **Não testado**; o instalador é um script bash e exigiria o WSL2 |
+
+### Para desenvolver
+
+Pré-requisitos: Node.js 20.12+ (22 LTS recomendado), Docker e [Ollama](https://ollama.com).
+No macOS, use o app nativo do Ollama, que usa a GPU da Apple; o Docker no macOS não usa.
+
+```bash
+git clone https://github.com/henriqueizar/Document_Analyzer_LLM
+cd Document_Analyzer_LLM
+cp backend/.env.example backend/.env
+cp frontend/.env.example frontend/.env.local
+```
+
+Preencha `BACKEND_JWT_SECRET` com o **mesmo** valor nos dois arquivos e `NEXTAUTH_SECRET`
+com outro valor (gere ambos com `openssl rand -base64 32`). Depois:
+
+```bash
+ollama pull qwen3:8b
+```
+
+```bash
+cd backend && docker compose up -d && npm install && npm run start:dev
+```
+
+```bash
+cd frontend && npm install && npm run dev
+```
+
+Abra http://localhost:3001. Na primeira execução, o app pede para criar a conta de
+administrador, com o código de instalação que o backend mostra no terminal
+(`Setup code: XXXX-XXXX`). Esqueceu a senha? `cd backend && npm run reset-password -- <e-mail>`.
+
+O `qwen3:8b` (~5 GB) cabe num Mac de 16 GB. Com 8 GB de RAM, use `qwen3:4b` ou
+`gemma3:4b` em `LLM_MODEL`, no `backend/.env`. Para Ollama em Docker (CPU ou GPU NVIDIA),
+testes e detalhes de arquitetura, veja [`docs/desenvolvimento.md`](docs/desenvolvimento.md).
+
 
 ## Em números
 
@@ -25,9 +95,9 @@ cada informação.
 | Respostas factuais corretas e com a página certa (modelo real, qwen3:8b) | **16/16** |
 | Recusas corretas para o que não está no documento ou exige julgamento | **9/11** na execução real; as 2 falhas foram corrigidas e passam ao reproduzir as respostas contra o código atual |
 | Tempo mediano por pergunta (qwen3:8b local, no Mac do autor) | **1,8 s** |
-| Conexões externas durante o uso | **0**, verificado por teste automático num contêiner sem rota para a internet |
+| Conexões para fora da instalação durante o uso | **0** de todas as tentativas registradas pelo aplicativo no fluxo completo (`deploy/verify-egress.sh`), com uma tentativa de controle provando que o registro funciona |
 | Modos de falha da LLM documentados, cada um com defesa e teste | **10** |
-| Testes automatizados | de **5** (gerados pelos frameworks) para **228** unitários + **18** ponta a ponta |
+| Testes automatizados | de **5** (gerados pelos frameworks) para **258** unitários + **32** ponta a ponta da API |
 | Reparo de fontes sem mapa de caracteres | **0** linhas alteradas indevidamente em 1.051 linhas de 55 PDFs |
 | Idiomas (interface, explicações e respostas) | **2** (português e inglês) |
 
@@ -105,47 +175,39 @@ imagens Docker e o modelo). Três formas de verificar, sem precisar confiar no a
    Claude, ChatGPT ou DeepSeek junto com este repositório. Ele pede à IA que *procure*
    vazamentos, e não que confirme que não há nenhum.
 2. **Sem internet:** desligue o Wi-Fi e use o app normalmente.
-3. **Automática:** `npm run verify:offline` (no `backend`) roda o fluxo completo num
-   contêiner Docker sem rota para a internet, depois de provar que o contêiner não alcança
-   nenhum host externo.
+3. **Medida:** `cd deploy && ./verify-egress.sh` sobe uma instalação de produção
+   temporária, faz o que os usuários fazem (login, upload com OCR, perguntas, todas as
+   páginas, por HTTPS) e registra **toda conexão que o aplicativo tenta**, inclusive as que
+   falhariam em silêncio. Falha se alguma for para fora da instalação, e uma tentativa de
+   controle feita de propósito prova que o registro está funcionando.
+
+Além disso, o backend **recusa iniciar** se a LLM ou o banco estiverem configurados para
+um endereço da internet (ou um modelo "cloud" do Ollama), a menos que isso seja permitido
+explicitamente. O aplicativo também desliga a tradução automática e o corretor ortográfico
+do navegador, que mandariam o texto da tela para a nuvem. Ele não tem como bloquear os
+recursos de IA do próprio navegador (como "Perguntar ao Google sobre esta página").
+Detalhes em [`docs/privacidade-lgpd.md`](docs/privacidade-lgpd.md).
 
 O inventário de dados pessoais (o que é guardado, onde e quem acessa) está em
 [`docs/privacidade-lgpd.md`](docs/privacidade-lgpd.md). É uma descrição técnica, não um
 parecer jurídico de conformidade.
 
-## Como rodar
+## Segurança
 
-Pré-requisitos: Node.js 20.12+ (22 LTS recomendado), Docker e [Ollama](https://ollama.com).
-No macOS, use o app nativo do Ollama, que usa a GPU da Apple; o Docker no macOS não usa.
+| Ameaça | Proteção |
+| --- | --- |
+| Alguém cria o administrador antes de quem instalou | Criar o administrador exige o **código de instalação**, mostrado só no servidor |
+| Adivinhar senhas | Senhas com hash scrypt; mínimo de 10 caracteres e recusa das mais comuns; bloqueio de 15 minutos após 5 erros na mesma conta ou 30 do mesmo endereço (pega quem testa uma senha em muitas contas) |
+| Acesso indevido a documentos | Privados por padrão; compartilhados só com as equipes escolhidas; quem não tem acesso recebe 404; o administrador não vê conteúdo |
+| Arquivo disfarçado (um executável renomeado para `.pdf`) | O conteúdo é conferido pelos primeiros bytes antes de qualquer leitura |
+| Instruções escondidas num documento (prompt injection) | O modelo não tem ferramentas nem rede: o pior caso é uma resposta errada, e as citações verificáveis ajudam a percebê-la |
+| Scripts ou conexões injetados na página | Política de segurança de conteúdo (CSP): o navegador só fala com o próprio app; sem incorporação em outros sites |
+| Abuso da LLM | Limite de perguntas por pessoa |
+| Rastrear quem viu o quê | Registro de atividades (só metadados), inclusive mudanças de membros de equipe pelo administrador |
 
-```bash
-git clone https://github.com/henriqueizar/Document_Analyzer_LLM
-cd Document_Analyzer_LLM
-cp backend/.env.example backend/.env
-cp frontend/.env.example frontend/.env.local
-```
-
-Preencha `BACKEND_JWT_SECRET` com o **mesmo** valor nos dois arquivos e `NEXTAUTH_SECRET`
-com outro valor (gere ambos com `openssl rand -base64 32`). Depois:
-
-```bash
-ollama pull qwen3:8b
-```
-
-```bash
-cd backend && docker compose up -d && npm install && npm run start:dev
-```
-
-```bash
-cd frontend && npm install && npm run dev
-```
-
-Abra http://localhost:3001. Na primeira execução, o app pede para criar a conta de
-administrador (se você vai usar sozinho, é a sua conta).
-
-O `qwen3:8b` (~5 GB) cabe num Mac de 16 GB. Com 8 GB de RAM, use `qwen3:4b` ou
-`gemma3:4b` em `LLM_MODEL`, no `backend/.env`. Para Ollama em Docker (CPU ou GPU NVIDIA),
-testes e detalhes de arquitetura, veja [`docs/desenvolvimento.md`](docs/desenvolvimento.md).
+Fora do alcance do aplicativo: um computador já comprometido por malware (use
+criptografia de disco e mantenha o sistema atualizado) e os recursos de IA do próprio
+navegador. Detalhes em [`docs/privacidade-lgpd.md`](docs/privacidade-lgpd.md).
 
 ## Roteiro
 
@@ -156,8 +218,10 @@ testes e detalhes de arquitetura, veja [`docs/desenvolvimento.md`](docs/desenvol
 - [x] Interface e respostas em português e inglês, com tradução sob demanda
 - [x] Equipes e compartilhamento entre setores, com chat próprio para cada pessoa (invisível para quem usa sozinho)
 - [x] Painel do administrador: saúde do sistema (banco, Ollama e modelo, fila, falhas, disco), equipes e compartilhamentos, sem acesso ao conteúdo
-- [ ] Busca entre documentos ("onde está o contrato em que o cliente ofereceu X reais?"),
+- [ ] **Versão 2:** busca entre documentos ("onde está o contrato em que o cliente ofereceu X reais?"),
       com a evidência de cada resultado e "nenhum documento" quando for o caso
+- [x] Instalação de produção com um comando: HTTPS local, reinício automático, backup diário, rede isolada, recuperação de senha
+- [x] Prova de que nada sai da instalação (`deploy/verify-egress.sh`)
 - [ ] Dados de demonstração por comando explícito (nunca numa instalação real)
 - [x] Exclusão de conta (apagar ou transferir os documentos, com a senha do administrador) e registro de atividades (só metadados)
 

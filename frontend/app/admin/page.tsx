@@ -9,12 +9,15 @@ import TeamsSection, { type Team } from './teams';
 import AuditSection from './audit';
 
 interface Health {
-  database: { ok: boolean; error?: string };
-  llm: { model: string; url: string; reachable: boolean; modelInstalled: boolean; error?: string };
+  /** location: where content goes (checked when the backend starts). */
+  database: { ok: boolean; error?: string; location?: Location; host?: string };
+  llm: { model: string; url: string; reachable: boolean; modelInstalled: boolean; error?: string; location?: Location };
   queue: { queued: number; reading: number; writingExplanation: number };
   failures: { reading: number; explanation: number };
   storage: { documents: number; uploadsBytes: number; missingFiles: number };
 }
+
+type Location = 'local' | 'private' | 'public';
 
 interface Usage {
   id: string;
@@ -119,8 +122,19 @@ function HealthSection({ health, onRefresh }: { health: Health; onRefresh: () =>
     : !llm.modelInstalled
       ? t('admin.modelMissing', { model: llm.model })
       : null;
+  const where = (l?: Location) => (l === 'public' ? t('admin.wherePublic') : t('admin.wherePrivate'));
   return (
     <section>
+      {llm.location && llm.location !== 'local' && (
+        <p className="warning" role="alert">
+          {t('admin.remoteLlm', { where: where(llm.location), host: llm.url })}
+        </p>
+      )}
+      {database.location && database.location !== 'local' && (
+        <p className="warning" role="alert">
+          {t('admin.remoteDatabase', { where: where(database.location), host: database.host ?? '' })}
+        </p>
+      )}
       <div className="title-row">
         <h2>{t('admin.health')}</h2>
         <button type="button" onClick={onRefresh}>

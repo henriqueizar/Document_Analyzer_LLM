@@ -15,6 +15,7 @@ export default function SetupPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
+  const [setupCode, setSetupCode] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -37,7 +38,7 @@ export default function SetupPage() {
       const res = await fetch(`${API_URL}/auth/setup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, email, password, language }),
+        body: JSON.stringify({ name, email, password, language, setupCode }),
       });
       if (!res.ok) throw new Error(await errorMessage(res));
       const login = await signIn('credentials', { email, password, redirect: false });
@@ -59,8 +60,20 @@ export default function SetupPage() {
       </small>
       <form onSubmit={submit} className="form">
         <label>
+          {t('setup.code')}
+          <input
+            value={setupCode}
+            onChange={(e) => setSetupCode(e.target.value)}
+            autoComplete="off"
+            placeholder="XXXX-XXXX"
+            required
+            autoFocus
+          />
+          <small>{t('setup.codeHint')}</small>
+        </label>
+        <label>
           {t('common.name')}
-          <input value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" required autoFocus />
+          <input value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" required />
         </label>
         <label>
           {t('common.email')}
@@ -68,11 +81,11 @@ export default function SetupPage() {
         </label>
         <label>
           {t('common.password')} <small>{t('common.atLeast8')}</small>
-          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" minLength={8} required />
+          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" minLength={10} required />
         </label>
         <label>
           {t('setup.confirm')}
-          <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" minLength={8} required />
+          <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" minLength={10} required />
         </label>
         {error && <p role="alert" className="error">{error}</p>}
         <button type="submit" disabled={busy}>{busy ? t('setup.submitting') : t('setup.submit')}</button>

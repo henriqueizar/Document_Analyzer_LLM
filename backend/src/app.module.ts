@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AppController } from './app.controller';
+import { HealthController } from './health.controller';
 import { AppService } from './app.service';
 import { DocumentsModule } from './documents/documents.module';
 import { PrismaModule } from './prisma/prisma.module';
@@ -13,7 +14,7 @@ import { AuditModule } from './audit/audit.module';
 // their owner through the authenticated GET /documents/:id/file route.
 @Module({
   imports: [PrismaModule, AuditModule, AuthModule, UsersModule, TeamsModule, AdminModule, DocumentsModule],
-  controllers: [AppController],
+  controllers: [AppController, HealthController],
   providers: [AppService],
 })
 export class AppModule {}

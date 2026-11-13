@@ -5,6 +5,8 @@ import {
   HttpException,
   HttpStatus,
   Injectable,
+  Logger,
+  OnModuleInit,
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -17,6 +19,8 @@ import {
 } from '../auth/password';
 import { defaultLanguage, isLanguage } from '../common/language';
 import { AuditService } from '../audit/audit.service';
+import { RateLimiter } from '../common/rate-limit';
+import { randomBytes, timingSafeEqual } from 'crypto';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 
@@ -46,8 +50,32 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const LOGIN_ATTEMPTS = 5;
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 
+/** Failed sign-ins per address: also slows down guessing many accounts at once. */
+const IP_LOGIN_ATTEMPTS = 30;
+/** Wrong setup codes per address. */
+const SETUP_ATTEMPTS = 10;
+/** No look-alike characters (0/O, 1/I/L): the code is typed by a person. */
+const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+
 @Injectable()
-export class UsersService {
+export class UsersService implements OnModuleInit {
+  private readonly logger = new Logger('Setup');
+  private readonly ipFailures = new RateLimiter(
+    IP_LOGIN_ATTEMPTS,
+    LOGIN_WINDOW_MS,
+  );
+  private readonly setupFailures = new RateLimiter(
+    SETUP_ATTEMPTS,
+    LOGIN_WINDOW_MS,
+  );
+  /**
+   * One-time code required to create the first administrator. Shown only to
+   * whoever runs the server (backend output, end of ./install.sh), so the
+   * first person to open the address cannot take over the installation.
+   * SETUP_CODE fixes it, for automated installs.
+   */
+  private setupCode: string | null = process.env.SETUP_CODE || null;
+
   /** Failed login attempts per e-mail, to slow down password guessing. */
   private readonly failures = new Map<
     string,
@@ -59,6 +87,23 @@ export class UsersService {
     private readonly audit: AuditService,
   ) {}
 
+  async onModuleInit() {
+    if (await this.needsSetup()) this.announceSetupCode();
+  }
+
+  private announceSetupCode(): string {
+    this.setupCode ??= Array.from(
+      randomBytes(8),
+      (b) => CODE_ALPHABET[b % CODE_ALPHABET.length],
+    )
+      .join('')
+      .replace(/^(.{4})/, '$1-');
+    this.logger.log(
+      `Setup code (needed to create the administrator account): ${this.setupCode}`,
+    );
+    return this.setupCode;
+  }
+
   /** The first run has no administrator yet: the setup screen creates one. */
   async needsSetup(): Promise<boolean> {
     return (
@@ -68,21 +113,55 @@ export class UsersService {
     );
   }
 
-  async createFirstAdmin(input: NewUser): Promise<PublicUser> {
+  async createFirstAdmin(
+    input: NewUser & { setupCode?: unknown },
+    ip = 'unknown',
+  ): Promise<PublicUser> {
     if (!(await this.needsSetup())) {
       throw new ConflictException(
         'The administrator account already exists. Sign in instead.',
       );
     }
-    return this.save({ ...input, role: 'ADMIN' }, { allowExisting: true });
+    if (!this.setupFailures.allowed(ip)) {
+      throw new HttpException(
+        'Too many wrong setup codes. Wait 15 minutes.',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+    const expected = this.setupCode ?? this.announceSetupCode();
+    const given =
+      typeof input.setupCode === 'string'
+        ? input.setupCode.trim().toUpperCase()
+        : '';
+    const a = Buffer.from(given.replace(/[^A-Z0-9]/g, ''));
+    const b = Buffer.from(expected.replace(/[^A-Z0-9]/g, ''));
+    if (a.length !== b.length || !timingSafeEqual(a, b)) {
+      this.setupFailures.hit(ip);
+      throw new ForbiddenException(
+        'Incorrect setup code. It is shown at the end of ./install.sh and in the backend output.',
+      );
+    }
+    const admin = await this.save(
+      { ...input, role: 'ADMIN' },
+      { allowExisting: true },
+    );
+    this.setupCode = null;
+    return admin;
   }
 
   async authenticate(
     emailInput: unknown,
     password: unknown,
+    ip = 'unknown',
   ): Promise<PublicUser> {
     const email = normalizeEmail(emailInput);
     this.checkThrottle(email);
+    if (!this.ipFailures.allowed(ip)) {
+      throw new HttpException(
+        'Too many failed attempts. Wait 15 minutes or ask the administrator to reset your password.',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
 
     const user = email
       ? await this.prisma.user.findUnique({ where: { email } })
@@ -92,6 +171,7 @@ export class UsersService {
       (await verifyPassword(password, user?.passwordHash));
     if (!user || !ok) {
       this.recordFailure(email);
+      this.ipFailures.hit(ip);
       if (email) await this.audit.record(email, 'LOGIN_FAILED');
       // Same message whether the e-mail exists or not.
       throw new UnauthorizedException('Incorrect e-mail or password.');

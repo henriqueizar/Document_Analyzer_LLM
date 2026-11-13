@@ -19,10 +19,16 @@ export const authOptions: NextAuthOptions = {
         email: { label: "E-mail", type: "email" },
         password: { label: "Password", type: "password" },
       },
-      async authorize(credentials) {
+      async authorize(credentials, req) {
+        // The proxy tells this server who the user is (X-Forwarded-For); passed on so
+        // the backend limits failed attempts per person, not per web server.
+        const forwarded = req?.headers?.["x-forwarded-for"];
         const res = await fetch(`${BACKEND_URL}/auth/login`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            ...(typeof forwarded === "string" ? { "X-Forwarded-For": forwarded } : {}),
+          },
           body: JSON.stringify({ email: credentials?.email, password: credentials?.password }),
         });
         if (res.status === 429) {

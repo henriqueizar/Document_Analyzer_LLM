@@ -169,7 +169,7 @@ function UserRow({
             placeholder={t('users.newPasswordPlaceholder')}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            minLength={8}
+            minLength={10}
             required
             autoFocus
           />
@@ -228,7 +228,7 @@ function AddUserForm({ onAdded }: { onAdded: () => void }) {
       </label>
       <label>
         {t('users.initialPassword')} <small>{t('users.initialPasswordHint')}</small>
-        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" minLength={8} required />
+        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" minLength={10} required />
       </label>
       <label>
         {t('account.role')}

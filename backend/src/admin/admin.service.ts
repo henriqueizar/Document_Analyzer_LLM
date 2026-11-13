@@ -4,6 +4,7 @@ import * as path from 'path';
 import { PrismaService } from '../prisma/prisma.service';
 import { LlmService } from '../llm/llm.service';
 import { AuditService } from '../audit/audit.service';
+import { currentDestinations } from '../common/destinations';
 
 /**
  * The administrator's panel: whether the system is working, and how teams and
@@ -56,9 +57,15 @@ export class AdminService {
         missingFiles++;
       }
     }
+    // where content goes (checked at startup): shown when it is not this machine
+    const destinations = currentDestinations();
     return {
-      database,
-      llm,
+      database: {
+        ...database,
+        location: destinations?.database.location ?? 'local',
+        host: destinations?.database.host,
+      },
+      llm: { ...llm, location: destinations?.llm.location ?? 'local' },
       queue: { queued, reading, writingExplanation: writing },
       failures: { reading: readFailed, explanation: explainFailed },
       storage: { documents: files.length, uploadsBytes, missingFiles },
