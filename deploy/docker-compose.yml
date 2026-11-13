@@ -70,6 +70,27 @@ services:
     networks: [private]
     logging: *logging
 
+  # Automatic backups (database + uploaded files) into deploy/backups/: on
+  # start and then daily, keeping 14 days. Copy that folder to another disk.
+  backup:
+    image: postgres:16
+    restart: unless-stopped
+    depends_on:
+      db: { condition: service_healthy }
+    # the files belong to the user who installed (so they can be copied elsewhere)
+    user: "${BACKUP_UID:-0:0}"
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      BACKUP_EVERY_HOURS: ${BACKUP_EVERY_HOURS:-24}
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
+    entrypoint: ["sh", "/backup-loop.sh"]
+    volumes:
+      - ./backup-loop.sh:/backup-loop.sh:ro
+      - ./backups:/backups
+      - uploads:/uploads:ro
+    networks: [private]
+    logging: *logging
+
   # The only entry point: https://<address>/ -> frontend, /backend/* -> API.
   proxy:
     image: caddy:2.8

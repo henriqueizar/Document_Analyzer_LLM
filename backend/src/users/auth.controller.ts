@@ -4,8 +4,11 @@ import {
   Get,
   HttpCode,
   Post,
+  Req,
   UseGuards,
 } from '@nestjs/common';
+import type { Request } from 'express';
+import { clientIp } from '../common/client-ip';
 import { AuthGuard, type AuthUser } from '../auth/auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { UsersService } from './users.service';
@@ -38,16 +41,21 @@ export class AuthController {
       email?: string;
       password?: string;
       language?: string;
+      setupCode?: string;
     },
+    @Req() req: Request,
   ) {
-    return this.users.createFirstAdmin(body);
+    return this.users.createFirstAdmin(body, clientIp(req));
   }
 
   /** Public: called by the frontend server (NextAuth credentials) to check a password. */
   @Post('login')
   @HttpCode(200)
-  login(@Body() body: { email?: string; password?: string }) {
-    return this.users.authenticate(body.email, body.password);
+  login(
+    @Body() body: { email?: string; password?: string },
+    @Req() req: Request,
+  ) {
+    return this.users.authenticate(body.email, body.password, clientIp(req));
   }
 
   @Get('me')

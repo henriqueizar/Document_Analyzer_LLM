@@ -16,7 +16,7 @@ FROM node:22-bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 # No telemetry, no update checks: nothing leaves the machine at run time.
-ENV NODE_ENV=production CHECKPOINT_DISABLE=1 NPM_CONFIG_UPDATE_NOTIFIER=false
+ENV NODE_ENV=production CHECKPOINT_DISABLE=1 NPM_CONFIG_UPDATE_NOTIFIER=false HOST=0.0.0.0
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/prisma ./prisma

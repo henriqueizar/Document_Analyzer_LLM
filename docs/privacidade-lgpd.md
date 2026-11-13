@@ -89,6 +89,19 @@ aplicar.
 - Registro de atividades (art. 37), só com metadados. Abrir o mesmo documento de novo
   conta uma vez a cada 10 minutos. O registro guarda o e-mail como texto, então
   sobrevive à exclusão da conta: depois dela, o e-mail continua no histórico.
+- **Instalação:** criar o primeiro administrador exige um código mostrado só no servidor.
+- **Senhas:** mínimo de 10 caracteres e recusa das mais comuns (lista local); bloqueio de 15
+  minutos após 5 erros na mesma conta ou 30 do mesmo endereço; recuperação pelo terminal do
+  servidor (`reset-password`), registrada.
+- **Navegador:** política de segurança de conteúdo (CSP) que só permite falar com o próprio
+  aplicativo; sem incorporação em outros sites; sem câmera, microfone ou localização.
+- **Uploads:** o conteúdo é conferido pelos primeiros bytes (um executável renomeado para
+  `.pdf` é recusado antes de qualquer leitura).
+- **Backups automáticos** (instalação de produção): diários, guardados por 14 dias em
+  `deploy/backups/`, só com permissão de leitura do dono. Eles contêm documentos e dados
+  pessoais: a cópia para outro disco deve ter a mesma proteção, e o prazo de 14 dias é a
+  retenção desses dados nos backups.
+- Em desenvolvimento, backend e interface só aceitam conexões da própria máquina.
 - CORS restrito à origem do frontend.
 - Banco e LLM acessíveis apenas em `127.0.0.1` no `docker-compose.yml`.
 - Respostas da LLM restritas ao conteúdo do documento, com citação de página e checagem
@@ -108,8 +121,6 @@ aplicar.
   atividades, assim como cada abertura de documento; o administrador não tem como apagar
   registros pela aplicação (só com acesso direto ao banco).
 - Política de retenção e detecção de dados sensíveis.
-- A tela de configuração inicial fica aberta até o administrador ser criado: faça a
-  configuração logo após instalar, antes de expor a aplicação na rede.
 - Para uso em produção: criptografia em repouso (disco / banco), senhas fortes no banco,
   HTTPS na rede interna e backups.
 

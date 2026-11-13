@@ -44,6 +44,8 @@ function fakePrisma() {
   };
 }
 
+process.env.SETUP_CODE = 'TEST-CODE';
+
 describe('UsersService', () => {
   let prisma: ReturnType<typeof fakePrisma>;
   let users: UsersService;
@@ -51,12 +53,66 @@ describe('UsersService', () => {
     name: 'Ana Admin',
     email: 'Ana@Example.com',
     password: 'admin-password',
+    setupCode: 'test-code',
   };
 
   beforeEach(() => {
     prisma = fakePrisma();
 
     users = new UsersService(prisma as any, { record: jest.fn() } as any);
+  });
+
+  describe('setup code', () => {
+    it('refuses to create the administrator without the code shown on the server', async () => {
+      await expect(
+        users.createFirstAdmin({ ...admin, setupCode: 'WRONG-CODE' }),
+      ).rejects.toThrow(/setup code/);
+      await expect(
+        users.createFirstAdmin({ ...admin, setupCode: undefined }),
+      ).rejects.toThrow(/setup code/);
+      await expect(users.needsSetup()).resolves.toBe(true);
+    });
+
+    it('accepts it in any case and with or without the dash', async () => {
+      await expect(
+        users.createFirstAdmin({ ...admin, setupCode: 'testcode' }),
+      ).resolves.toMatchObject({ role: 'ADMIN' });
+    });
+
+    it('stops accepting guesses from an address after 10 wrong codes', async () => {
+      for (let i = 0; i < 10; i++) {
+        await expect(
+          users.createFirstAdmin(
+            { ...admin, setupCode: 'NOPE' },
+            '192.168.0.9',
+          ),
+        ).rejects.toThrow(/Incorrect setup code/);
+      }
+      await expect(
+        users.createFirstAdmin(admin, '192.168.0.9'),
+      ).rejects.toThrow(/Too many wrong setup codes/);
+      await expect(
+        users.createFirstAdmin(admin, '192.168.0.10'),
+      ).resolves.toBeTruthy();
+    });
+  });
+
+  describe('password spraying', () => {
+    it('blocks an address that fails on many different accounts', async () => {
+      await users.createFirstAdmin(admin);
+      for (let i = 0; i < 30; i++) {
+        await expect(
+          users.authenticate(`user${i}@example.com`, 'Spring2026!', '10.9.9.9'),
+        ).rejects.toThrow(/Incorrect/);
+      }
+      await expect(
+        users.authenticate('ana@example.com', 'admin-password', '10.9.9.9'),
+      ).rejects.toThrow(/Too many failed attempts/);
+      // another address is not affected
+      await expect(
+        users.authenticate('ana@example.com', 'admin-password', '10.9.9.10'),
+      ).resolves.toBeTruthy();
+    });
   });
 
   describe('first-run setup', () => {
@@ -148,14 +204,14 @@ describe('UsersService', () => {
         users.create({
           name: 'Bob',
           email: 'not-an-email',
-          password: 'password1',
+          password: 'bob-password-one',
         }),
       ).rejects.toThrow('Enter a valid e-mail address.');
       await expect(
         users.create({
           name: ' ',
           email: 'bob@example.com',
-          password: 'password1',
+          password: 'bob-password-one',
         }),
       ).rejects.toThrow('Enter a name.');
       await expect(
@@ -164,21 +220,21 @@ describe('UsersService', () => {
           email: 'bob@example.com',
           password: 'short',
         }),
-      ).rejects.toThrow(/at least 8 characters/);
+      ).rejects.toThrow(/at least 10 characters/);
     });
 
     it('creates regular users by default and refuses duplicates', async () => {
       const bob = await users.create({
         name: 'Bob',
         email: 'bob@example.com',
-        password: 'password1',
+        password: 'bob-password-one',
       });
       expect(bob.role).toBe('USER');
       await expect(
         users.create({
           name: 'Bob 2',
           email: 'BOB@example.com',
-          password: 'password2',
+          password: 'bob-password-two',
         }),
       ).rejects.toThrow('A user with this e-mail already exists.');
     });
@@ -187,11 +243,11 @@ describe('UsersService', () => {
       const bob = await users.create({
         name: 'Bob',
         email: 'bob@example.com',
-        password: 'password1',
+        password: 'bob-password-one',
       });
-      await users.resetPassword(bob.id, 'new-password');
+      await users.resetPassword(bob.id, 'a-new-password');
       await expect(
-        users.authenticate('bob@example.com', 'new-password'),
+        users.authenticate('bob@example.com', 'a-new-password'),
       ).resolves.toBeTruthy();
     });
 
@@ -199,18 +255,18 @@ describe('UsersService', () => {
       await users.create({
         name: 'Bob',
         email: 'bob@example.com',
-        password: 'password1',
+        password: 'bob-password-one',
       });
       await expect(
-        users.changeOwnPassword('bob@example.com', 'wrong', 'password2'),
+        users.changeOwnPassword('bob@example.com', 'wrong', 'bob-password-two'),
       ).rejects.toThrow('The current password is incorrect.');
       await users.changeOwnPassword(
         'bob@example.com',
-        'password1',
-        'password2',
+        'bob-password-one',
+        'bob-password-two',
       );
       await expect(
-        users.authenticate('bob@example.com', 'password2'),
+        users.authenticate('bob@example.com', 'bob-password-two'),
       ).resolves.toBeTruthy();
     });
   });

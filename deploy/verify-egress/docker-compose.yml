@@ -9,6 +9,7 @@ services:
     environment:
       NODE_OPTIONS: --require /monitor/egress-monitor.cjs
       EGRESS_NAME: backend
+      SETUP_CODE: VERIFY-CODE
     volumes:
       - ./verify-egress/egress-monitor.cjs:/monitor/egress-monitor.cjs:ro
       - ./verify-egress/check.cjs:/monitor/check.cjs:ro

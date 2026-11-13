@@ -46,6 +46,9 @@ if [ -f .env ]; then
   say "Já instalado (deploy/.env existe). Subindo com a configuração atual..."
   if [ "${DOLLMA_SKIP_BUILD:-0}" = 1 ]; then docker compose up -d; else docker compose up -d --build; fi
   say "Pronto. Para mudar endereço ou modelo, edite deploy/.env e rode: docker compose up -d"
+  sleep 5
+  code=$(docker compose logs backend 2>/dev/null | grep -o 'Setup code[^:]*: [A-Z0-9-]*' | tail -1 | awk '{print $NF}')
+  [ -n "$code" ] && echo "Administrador ainda não criado. Código de instalação: $code"
   exit 0
 fi
 
@@ -104,8 +107,10 @@ LLM_MODEL=$DOLLMA_MODEL
 POSTGRES_PASSWORD=$(secret)
 BACKEND_JWT_SECRET=$(secret)
 NEXTAUTH_SECRET=$(secret)
+BACKUP_UID=$(id -u):$(id -g)
 ENV
 umask 022
+mkdir -p backups
 
 if [ "${DOLLMA_SKIP_BUILD:-0}" = 1 ]; then
   # Images built elsewhere and loaded with `docker load` (servers without internet).
@@ -153,8 +158,13 @@ if [[ "$site_url" == https://* ]]; then
   docker compose cp proxy:/data/caddy/pki/authorities/local/root.crt ./dollma-root.crt >/dev/null 2>&1 && chmod 644 dollma-root.crt || true
 fi
 
+code=$(docker compose logs backend 2>/dev/null | grep -o 'Setup code[^:]*: [A-Z0-9-]*' | tail -1 | awk '{print $NF}')
 say "Instalado. Acesse: $site_url"
-echo "Na primeira visita, crie a conta de administrador."
+echo "Na primeira visita, crie a conta de administrador com o código de instalação:"
+echo
+printf '    \033[1m%s\033[0m\n' "${code:-(veja: docker compose logs backend | grep 'Setup code')}"
+echo
+echo "Só quem tem acesso a este servidor vê esse código: ninguém mais consegue criar o administrador."
 if [ -f dollma-root.crt ]; then
   echo
   echo "Certificado: o HTTPS usa uma autoridade certificadora local, criada nesta máquina."
@@ -162,4 +172,6 @@ if [ -f dollma-root.crt ]; then
   echo "certificado raiz confiável nas máquinas que vão acessar (veja docs/implantacao.md)."
 fi
 echo
+echo "Backups automáticos: todo dia, em deploy/backups/ (últimos 14 dias). Copie essa pasta para outro disco."
+echo "Esqueceu a senha do administrador? ./reset-password.sh <e-mail>"
 echo "Comandos úteis (nesta pasta): docker compose ps | docker compose logs -f | ./backup.sh | ./update.sh"

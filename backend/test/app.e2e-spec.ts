@@ -602,6 +602,18 @@ describe('Documents API (e2e)', () => {
       await http().get('/').expect(200);
     });
 
+    it('400 when the content is not what the name says (e.g. an image renamed to .pdf)', async () => {
+      const prisma = app.get(PrismaService);
+      const before = await prisma.document.count();
+      const res = await http()
+        .post('/documents/upload')
+        .set('Authorization', alice)
+        .attach('file', fixture('receipt.png'), { filename: 'contrato.pdf', contentType: 'application/pdf' })
+        .expect(400);
+      expect(res.body.message).toBe('The file content does not match its type.');
+      expect(await prisma.document.count()).toBe(before);
+    });
+
     it('400 when no file is sent', async () => {
       await http().post('/documents/upload').set('Authorization', alice).expect(400);
     });

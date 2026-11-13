@@ -18,8 +18,16 @@ describe('password hashing', () => {
     await expect(verifyPassword('anything', 'plain-text')).resolves.toBe(false);
   });
 
-  it('requires at least 8 characters', () => {
-    expect(passwordProblem('short')).toMatch(/at least 8/);
+  it('requires at least 10 characters', () => {
+    expect(passwordProblem('short')).toMatch(/at least 10/);
+    expect(passwordProblem('9 letters')).toMatch(/at least 10/);
     expect(passwordProblem('long enough')).toBeNull();
+  });
+
+  it('refuses passwords attackers try first', () => {
+    for (const weak of ['1234567890', 'senha123456', 'Password123', 'aaaaaaaaaaaa', '12345678901234567890']) {
+      expect(passwordProblem(weak)).toMatch(/too common/);
+    }
+    expect(passwordProblem('cavalo-bateria-grampo')).toBeNull();
   });
 });

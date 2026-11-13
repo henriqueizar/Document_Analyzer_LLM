@@ -7,7 +7,24 @@ const P = 1;
 const KEY_LENGTH = 64;
 const MAX_MEMORY = 128 * N * R * 2;
 
-export const MIN_PASSWORD_LENGTH = 8;
+export const MIN_PASSWORD_LENGTH = 10;
+
+/**
+ * Passwords attackers try first (lists of leaked passwords, in English and
+ * Portuguese), compared ignoring case. Local list: nothing is looked up online.
+ */
+const COMMON = new Set(
+  [
+    '1234567890', '0123456789', '12345678910', '1234567891', '0987654321', '1111111111', '0000000000',
+    'qwertyuiop', 'asdfghjkl1', 'qwerty1234', '1q2w3e4r5t', '1qaz2wsx3edc', 'zaq12wsxcde',
+    'password12', 'password123', 'password1234', 'passw0rd123', 'iloveyou12', 'letmein123',
+    'welcome123', 'admin12345', 'administrator', 'administrador', 'changeme123',
+    'senha12345', 'senha123456', 'minhasenha', 'minhasenha123', 'mudar12345', 'trocar1234',
+    'brasil1234', 'flamengo123', 'corinthians', 'palmeiras123', 'saopaulo123', 'gremio1234',
+    'abcdefghij', 'abcd123456', 'abc1234567', 'a1b2c3d4e5', 'football12', 'princess12',
+    'sunshine12', 'superman12', 'starwars12', 'dragon1234', 'monkey1234', 'master1234',
+  ].map((p) => p.toLowerCase()),
+);
 
 function scrypt(password: string, salt: Buffer, n: number, r: number, p: number): Promise<Buffer> {
   return new Promise((resolve, reject) =>
@@ -36,6 +53,10 @@ export async function verifyPassword(password: string, stored: string | null | u
 export function passwordProblem(password: unknown): string | null {
   if (typeof password !== 'string' || password.length < MIN_PASSWORD_LENGTH) {
     return `The password must have at least ${MIN_PASSWORD_LENGTH} characters.`;
+  }
+  const lower = password.toLowerCase();
+  if (COMMON.has(lower) || /^(.)\1+$/.test(password) || /^(?:0123456789|1234567890)+$/.test(password)) {
+    return 'This password is too common. Choose another one.';
   }
   return null;
 }

@@ -37,8 +37,11 @@ O instalador pergunta três coisas:
 3. **O modelo:** `qwen3:8b` por padrão.
 
 Ele gera sozinho todas as senhas e chaves (em `deploy/.env`, legível só pelo seu usuário),
-monta as imagens, baixa o modelo e sobe tudo. No fim, mostra o endereço. Na primeira
-visita, crie a conta de administrador.
+monta as imagens, baixa o modelo e sobe tudo. No fim, mostra o endereço e o **código de
+instalação** (por exemplo, `P6AK-VWWP`). Abra o endereço e crie a conta de administrador
+com esse código: ele só aparece para quem tem acesso ao servidor, então ninguém mais na rede
+consegue criar o administrador antes de você. Se perder o código:
+`docker compose logs backend | grep "Setup code"`.
 
 Instalação sem perguntas (automação):
 
@@ -94,7 +97,8 @@ Todos os comandos rodam dentro da pasta `deploy/`:
 | Ver os logs | `docker compose logs -f` (ou `docker compose logs -f backend`) |
 | Monitorar de fora | `https://<endereço>/backend/health` responde `{"status":"ok"}` (sem nenhum dado) |
 | Parar e iniciar | `docker compose stop` / `docker compose start` |
-| Fazer backup | `./backup.sh` |
+| Fazer um backup extra agora | `./backup.sh` |
+| Recuperar a senha de alguém (inclusive do administrador) | `./reset-password.sh <e-mail>` |
 | Restaurar um backup | `./restore.sh backups/db-<data>.sql.gz backups/uploads-<data>.tar.gz` |
 | Atualizar | `./backup.sh && ./update.sh` |
 
@@ -118,15 +122,22 @@ a menos que `ALLOW_REMOTE_LLM=1` seja definido de propósito (o mesmo vale para 
 
 ### Backup
 
-`./backup.sh` salva o banco e os arquivos enviados em `deploy/backups/`. Duas
-recomendações:
+O backup é **automático**: o serviço `backup` salva o banco e os arquivos enviados em
+`deploy/backups/` quando a instalação inicia e depois a cada 24 horas, guardando os últimos
+14 dias (ajuste com `BACKUP_EVERY_HOURS` e `BACKUP_KEEP_DAYS` em `deploy/.env`). Para ver se
+está funcionando: `docker compose logs backup`. `./backup.sh` faz um backup extra na hora.
 
-- **Agende** o backup, por exemplo todo dia às 2h com o cron:
-  `0 2 * * * cd /caminho/para/deploy && ./backup.sh`.
 - **Copie `deploy/backups/` para outro disco ou outra máquina.** Um backup no mesmo disco
   não sobrevive à falha do disco. Guarde também o `deploy/.env`, que tem as chaves desta
   instalação. Os backups contêm documentos e dados pessoais: proteja-os como os dados
   originais.
+
+### Senha esquecida
+
+Um administrador redefine a senha de qualquer pessoa em "Usuários". Se o **único**
+administrador esquecer a senha, quem tem acesso ao servidor roda
+`./reset-password.sh admin@empresa.com`: o comando mostra uma senha temporária (a pessoa entra
+e troca em "Conta") e fica no registro de atividades.
 
 ### Atualizar
 
@@ -171,4 +182,6 @@ e copie a pasta de modelos do Ollama para o volume `dollma_ollama`.
 | Não abre por outro nome ou IP do servidor, ou o login falha | O certificado e o login valem só para o endereço configurado. Use exatamente o de `SITE_URL` em `deploy/.env`. Para mudar, altere `SITE_ADDRESS` e `SITE_URL` e rode `docker compose up -d` |
 | Painel mostra "O Ollama não responde" | Modos `gpu` e `cpu`: veja `docker compose logs ollama`. Modo `native`: confirme que o app do Ollama está aberto |
 | Painel mostra "modelo não instalado" | Modos `gpu` e `cpu`: rode `./install.sh` de novo ou baixe o modelo como na instalação. Modo `native`: rode `ollama pull <modelo>` |
+| Perdi o código de instalação | `docker compose logs backend \| grep "Setup code"` (um código novo é gerado a cada reinício enquanto o administrador não existe) |
+| O administrador esqueceu a senha | `./reset-password.sh <e-mail>` |
 | Porta 80 ou 443 ocupada | Em `deploy/.env`, defina `HTTPS_PORT` (e `HTTP_PORT`) e inclua a porta no `SITE_URL` (por exemplo, `https://documentos.empresa.local:8443`); o `SITE_ADDRESS` fica sem porta. Rode `docker compose up -d` |

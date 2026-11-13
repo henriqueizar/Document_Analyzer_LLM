@@ -68,8 +68,18 @@ is used instead.
 Local accounts only; no external identity provider.
 
 - **First run:** while no administrator exists, the app shows a setup screen that creates
-  one (`POST /auth/setup`, refused once an administrator exists). Do it right after
-  installing.
+  one (`POST /auth/setup`, refused once an administrator exists). It requires the setup
+  code printed by the backend (`Setup code: XXXX-XXXX`; `SETUP_CODE` fixes it for
+  automated installs), so nobody else on the network can create the administrator first.
+- **Forgotten password:** `npm run reset-password -- <e-mail>` (in production:
+  `deploy/reset-password.sh`) sets a temporary password and records it in the activity log.
+- **Limits:** 5 failed sign-ins per account and 30 per address (15 min), 10 wrong setup
+  codes per address, 20 questions per person per minute. The client address comes from
+  `X-Forwarded-For` only when the connection itself is internal (proxy or web server).
+- **Headers:** the API sends `nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy:
+  no-referrer` and a deny-all CSP; the web pages send a CSP that only allows this app (and,
+  in development, the API port). Backend and dev server listen on localhost unless
+  `HOST` says otherwise (the Docker image sets `HOST=0.0.0.0`).
 - **Sign-in:** e-mail and password, checked by the backend (`POST /auth/login`).
   Passwords are stored as salted scrypt hashes, never in plain text. After 5 failed
   attempts an e-mail is blocked for 15 minutes. Sessions last 12 hours.

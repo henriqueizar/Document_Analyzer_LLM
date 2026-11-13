@@ -30,7 +30,7 @@ step('first page (server-rendered by the frontend)');
 await expectOk(await call('/'), 'home');
 step('create the administrator');
 await expectOk(
-  await call('/backend/auth/setup', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Verify', email: EMAIL, password: PASSWORD }) }),
+  await call('/backend/auth/setup', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Verify', email: EMAIL, password: PASSWORD, setupCode: 'VERIFY-CODE' }) }),
   'setup',
 );
 step('sign in through the web server (NextAuth)');

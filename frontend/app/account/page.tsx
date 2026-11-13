@@ -98,11 +98,11 @@ export default function AccountPage() {
         </label>
         <label>
           {t('account.new')} <small>{t('common.atLeast8')}</small>
-          <input type="password" value={next} onChange={(e) => setNext(e.target.value)} autoComplete="new-password" minLength={8} required />
+          <input type="password" value={next} onChange={(e) => setNext(e.target.value)} autoComplete="new-password" minLength={10} required />
         </label>
         <label>
           {t('account.confirmNew')}
-          <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" minLength={8} required />
+          <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" minLength={10} required />
         </label>
         {message && (
           <p role="alert" className={message.ok ? 'success' : 'error'}>{message.text}</p>
