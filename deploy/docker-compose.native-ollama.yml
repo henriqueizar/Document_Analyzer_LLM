@@ -1,0 +1,11 @@
+# Ollama running on this machine outside Docker (the native app on a Mac, which
+# uses the Apple GPU). Chosen by ./install.sh. The backend then needs a route to
+# the host, so it also joins the normal network: the database and the frontend
+# stay without internet access, the backend no longer is.
+services:
+  backend:
+    environment:
+      OLLAMA_URL: http://host.docker.internal:11434
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks: [private, public]

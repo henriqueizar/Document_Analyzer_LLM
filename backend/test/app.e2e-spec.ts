@@ -216,6 +216,11 @@ describe('Documents API (e2e)', () => {
       expect(list.body).toEqual([]);
     });
 
+    it('health check is public and says nothing but whether it works', async () => {
+      const { body } = await http().get('/health').expect(200);
+      expect(body).toEqual({ status: 'ok' });
+    });
+
     it('uploads are no longer served publicly', async () => {
       await http().get('/uploads/anything.pdf').expect(404);
     });

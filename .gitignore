@@ -23,3 +23,8 @@ uploads/
 
 # Example env files are documentation, not secrets
 !.env.example
+
+# Production installation (deploy/)
+deploy/.env
+deploy/backups/
+deploy/*.crt

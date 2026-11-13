@@ -1,0 +1,11 @@
+# Ollama in Docker with an NVIDIA GPU (Linux, or Windows with WSL2). Needs the
+# NVIDIA Container Toolkit on the host. Chosen by ./install.sh.
+services:
+  ollama:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

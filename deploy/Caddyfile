@@ -1,0 +1,25 @@
+# Single entry point for the users' browsers. Certificates come from a local
+# certificate authority created on this machine: no Let's Encrypt, no request
+# to the internet. Browsers trust it once its root certificate is installed
+# (./install.sh exports it as dollma-root.crt).
+{
+	admin off
+	local_certs
+	skip_install_trust
+}
+
+{$SITE_ADDRESS} {
+	encode gzip
+
+	# The API (NestJS), on the same address: no CORS, one certificate.
+	handle_path /backend/* {
+		reverse_proxy backend:3000
+	}
+
+	# The web interface (Next.js).
+	handle {
+		reverse_proxy frontend:3001
+	}
+
+	header -Server
+}

@@ -115,6 +115,13 @@ parecer jurídico de conformidade.
 
 ## Como rodar
 
+**Para usar (empresa ou uso contínuo):** com o Docker instalado, `cd deploy && ./install.sh`.
+O instalador gera as senhas, monta tudo, baixa o modelo e sobe o aplicativo com HTTPS
+local, reinício automático e rede sem saída para a internet. Backup, atualização e
+problemas comuns estão em [`docs/implantacao.md`](docs/implantacao.md).
+
+**Para desenvolver o aplicativo:**
+
 Pré-requisitos: Node.js 20.12+ (22 LTS recomendado), Docker e [Ollama](https://ollama.com).
 No macOS, use o app nativo do Ollama, que usa a GPU da Apple; o Docker no macOS não usa.
 

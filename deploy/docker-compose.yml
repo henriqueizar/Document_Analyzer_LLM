@@ -1,0 +1,106 @@
+# Production installation: run ./install.sh once; it writes .env next to this
+# file (secrets, address, which LLM) and starts everything. Afterwards, from
+# this folder: `docker compose ps`, `docker compose logs -f`, ./update.sh,
+# ./backup.sh. Everything restarts by itself after a crash or a reboot.
+#
+# Network isolation: the database, backend, frontend and (when in Docker) the
+# LLM sit on a network with NO route to the internet. Only the proxy is also on
+# a normal network, to publish the ports for the users' browsers.
+name: dollma
+
+x-logging: &logging
+  driver: json-file
+  options: { max-size: "10m", max-file: "5" }
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: dollma
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?run ./install.sh first}
+      POSTGRES_DB: dollma
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    networks: [private]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "dollma"]
+      interval: 5s
+      retries: 30
+    logging: *logging
+
+  backend:
+    build: ../backend
+    restart: unless-stopped
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      DATABASE_URL: postgresql://dollma:${POSTGRES_PASSWORD}@db:5432/dollma
+      BACKEND_JWT_SECRET: ${BACKEND_JWT_SECRET:?run ./install.sh first}
+      FRONTEND_ORIGIN: ${SITE_URL:?run ./install.sh first}
+      OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
+      LLM_MODEL: ${LLM_MODEL:-qwen3:8b}
+      LLM_NUM_CTX: ${LLM_NUM_CTX:-8192}
+      DEFAULT_LANGUAGE: ${DEFAULT_LANGUAGE:-pt}
+    volumes:
+      - uploads:/app/uploads
+    networks: [private]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 10s
+      start_period: 60s
+      retries: 6
+    logging: *logging
+
+  frontend:
+    build: ../frontend
+    restart: unless-stopped
+    depends_on:
+      backend: { condition: service_healthy }
+    environment:
+      NEXTAUTH_URL: ${SITE_URL}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:?run ./install.sh first}
+      BACKEND_JWT_SECRET: ${BACKEND_JWT_SECRET}
+      BACKEND_URL: http://backend:3000
+    networks: [private]
+    logging: *logging
+
+  # The only entry point: https://<address>/ -> frontend, /backend/* -> API.
+  proxy:
+    image: caddy:2.8
+    restart: unless-stopped
+    depends_on: [frontend]
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-localhost}
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [private, public]
+    logging: *logging
+
+  # The LLM in Docker (Linux servers). On a Mac, Ollama runs as the native app
+  # instead, to use the Apple GPU (see docker-compose.native-ollama.yml).
+  ollama:
+    profiles: [ollama]
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    volumes:
+      - ollama:/root/.ollama
+    networks: [private]
+    logging: *logging
+
+volumes:
+  db_data:
+  uploads:
+  ollama:
+  caddy_data:
+  caddy_config:
+
+networks:
+  private:
+    internal: true
+  public: {}
