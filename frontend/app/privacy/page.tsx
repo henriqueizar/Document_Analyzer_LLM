@@ -15,14 +15,14 @@ const REPOSITORY = 'https://github.com/henriqueizar/Document_Analyzer_LLM';
 const AUDIT_PROMPT = {
   en: `Analyse this repository as a sceptical privacy auditor: ${REPOSITORY}
 
-List every way data could leave the machine it runs on: network calls in the code, external authentication, telemetry (including from dependencies such as Next.js, Prisma and tesseract.js), CDNs, external fonts or scripts, and downloads at run time. For each one, give the file, what data would be sent and whether it can be disabled.
+List every way data could leave the machine it runs on: network calls in the code, external authentication, telemetry and version checks (including from dependencies such as Next.js, Prisma and tesseract.js), CDNs, external fonts or scripts, downloads at run time and browser features (spell checking, translation). For each one, give the file, what data would be sent, whether it is user content or only metadata, whether it happens in development mode, in production or only with a non-default configuration, and whether it can be disabled.
 
-Then answer: during normal use (login, upload, OCR, questions and answers), is any document, extracted text, question, answer or personal data sent outside the machine? Justify by quoting the code.`,
+Then answer: during normal use (login, upload, OCR, questions and answers), is any document, extracted text, question, answer or personal data sent outside the machine? Justify by quoting the code. Also say what you could not verify by reading the code alone, and how confident you are.`,
   pt: `Analise este repositório como um auditor de privacidade cético: ${REPOSITORY}
 
-Liste todas as formas pelas quais dados podem sair da máquina onde ele roda: chamadas de rede no código, autenticação externa, telemetria (inclusive de dependências como Next.js, Prisma e tesseract.js), CDNs, fontes ou scripts externos e downloads em tempo de execução. Para cada uma, indique o arquivo, que dado seria enviado e se é desativável.
+Liste todas as formas pelas quais dados podem sair da máquina onde ele roda: chamadas de rede no código, autenticação externa, telemetria e verificações de versão (inclusive de dependências como Next.js, Prisma e tesseract.js), CDNs, fontes ou scripts externos, downloads em tempo de execução e recursos do navegador (corretor ortográfico, tradução). Para cada uma, indique o arquivo, que dado seria enviado, se é conteúdo do usuário ou só metadados, se ocorre em modo de desenvolvimento, em produção ou só com uma configuração diferente do padrão, e se é desativável.
 
-Depois responda: durante o uso normal (login, upload, OCR, perguntas e respostas), algum documento, texto extraído, pergunta, resposta ou dado pessoal é enviado para fora da máquina? Justifique citando o código.`,
+Depois responda: durante o uso normal (login, upload, OCR, perguntas e respostas), algum documento, texto extraído, pergunta, resposta ou dado pessoal é enviado para fora da máquina? Justifique citando o código. Diga também o que você não conseguiu verificar apenas lendo o código e o seu grau de confiança.`,
 };
 
 interface Me {
@@ -180,18 +180,32 @@ function ChecksEn() {
         <p>
           Turn off Wi-Fi (or unplug the network cable) and use the application as usual: sign in,
           upload a document, ask questions. Everything keeps working. To watch connections, use an
-          outbound firewall such as LuLu (macOS, free): no process of this application connects to
-          external hosts.
+          outbound firewall such as LuLu (macOS, free). Installed in production mode (the{' '}
+          <code>deploy</code> folder), no process of this application connects to external hosts;
+          the development server (<code>npm run dev</code>) checks for a newer Next.js version,
+          sending no data of yours.
         </p>
       </div>
 
       <div className="check">
         <h3>3. Run the automatic check</h3>
         <p>
-          In the <code>backend</code> folder, run <code>npm run verify:offline</code> (needs
-          Docker). It runs the full flow (login, upload, OCR, questions) in a container with
-          <strong> no route to the internet</strong>, after first proving that the container cannot
-          reach any external host.
+          In the <code>deploy</code> folder, run <code>./verify-egress.sh</code> (needs Docker). It
+          starts a temporary production installation, does what users do (sign-in, upload with
+          OCR, questions, every page) and records <strong>every connection the application
+          attempts</strong>, including those that would fail silently. It fails if any goes outside
+          the installation, and it checks that the recording works with a deliberate control
+          attempt.
+        </p>
+      </div>
+
+      <div className="check">
+        <h3>Your browser</h3>
+        <p>
+          The app turns off the browser&apos;s automatic translation and spell checking, which
+          would send the text on screen to cloud services. It cannot block the browser&apos;s AI
+          features: do not use &quot;Ask Google about this page&quot;, Google Lens or Gemini in
+          Chrome with a document open, because they send the page to Google.
         </p>
       </div>
 
@@ -215,18 +229,32 @@ function ChecksPt() {
         <p>
           Desligue o Wi-Fi (ou tire o cabo de rede) e use o aplicativo normalmente: faça login, envie
           um documento, faça perguntas. Tudo continua funcionando. Para observar as conexões, use um
-          firewall de saída como o LuLu (macOS, gratuito): nenhum processo deste aplicativo se conecta
-          a hosts externos.
+          firewall de saída como o LuLu (macOS, gratuito). Instalado em modo produção (a pasta{' '}
+          <code>deploy</code>), nenhum processo deste aplicativo se conecta a hosts externos; o
+          servidor de desenvolvimento (<code>npm run dev</code>) consulta se há versão nova do
+          Next.js, sem enviar nenhum dado seu.
         </p>
       </div>
 
       <div className="check">
         <h3>3. Rode a verificação automática</h3>
         <p>
-          Na pasta <code>backend</code>, rode <code>npm run verify:offline</code> (requer Docker).
-          Ele executa o fluxo completo (login, upload, OCR, perguntas) num contêiner
-          <strong> sem rota para a internet</strong>, depois de provar que o contêiner não consegue
-          alcançar nenhum host externo.
+          Na pasta <code>deploy</code>, rode <code>./verify-egress.sh</code> (requer Docker). Ele
+          sobe uma instalação de produção temporária, faz o que os usuários fazem (login, upload com
+          OCR, perguntas, todas as páginas) e registra <strong>toda conexão que o aplicativo
+          tenta</strong>, inclusive as que falhariam em silêncio. Falha se alguma for para fora da
+          instalação, e confere que o registro funciona com uma tentativa de controle feita de
+          propósito.
+        </p>
+      </div>
+
+      <div className="check">
+        <h3>O seu navegador</h3>
+        <p>
+          O aplicativo desliga a tradução automática e o corretor ortográfico do navegador, que
+          mandariam o texto da tela para serviços na nuvem. Ele não tem como bloquear os recursos de
+          IA do navegador: não use &quot;Perguntar ao Google sobre esta página&quot;, o Google Lens
+          ou o Gemini no Chrome com um documento aberto, porque eles enviam a página ao Google.
         </p>
       </div>
 

@@ -222,6 +222,10 @@ const en = {
   'admin.owner': 'Owner',
   'admin.sharedAt': 'Shared on',
   'admin.status': 'Status',
+  'admin.remoteLlm': 'The LLM is not on this machine ({where}: {host}). Document excerpts, questions and answers are sent there.',
+  'admin.remoteDatabase': 'The database is not on this machine ({where}: {host}). All documents are stored there.',
+  'admin.wherePrivate': 'another machine of the private network',
+  'admin.wherePublic': 'ON THE INTERNET, allowed explicitly in the configuration',
 
   // account deletion (Users)
   'users.delete': 'Delete account',
@@ -474,6 +478,10 @@ const pt: Record<MessageKey, string> = {
   'admin.owner': 'Dono',
   'admin.sharedAt': 'Compartilhado em',
   'admin.status': 'Status',
+  'admin.remoteLlm': 'A LLM não está nesta máquina ({where}: {host}). Trechos dos documentos, perguntas e respostas são enviados para lá.',
+  'admin.remoteDatabase': 'O banco de dados não está nesta máquina ({where}: {host}). Todos os documentos ficam guardados lá.',
+  'admin.wherePrivate': 'outra máquina da rede privada',
+  'admin.wherePublic': 'NA INTERNET, permitido explicitamente na configuração',
 
   'users.delete': 'Excluir conta',
   'users.deleteTitle': 'Excluir a conta de {name}',

@@ -10,6 +10,8 @@ import Footer from './footer';
 export const metadata: Metadata = {
   title: "Document LLM Analyzer",
   description: "Upload a document, get an explanation and ask questions about it.",
+  // Browsers must not offer to send these pages to a cloud translator.
+  other: { google: "notranslate" },
 };
 
 export default function RootLayout({
@@ -18,8 +20,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="pt-BR">
-      <body>
+    // translate="no": no automatic page translation (it sends the text to a cloud service).
+    // spellCheck={false}: inherited by every field, so the browser's cloud spell checker
+    // (e.g. Chrome's enhanced spell check) never receives what is typed here.
+    <html lang="pt-BR" translate="no">
+      <body spellCheck={false}>
         <Providers>
           <NavBar />
           <main className="page">{children}</main>

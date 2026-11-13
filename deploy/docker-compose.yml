@@ -30,6 +30,7 @@ services:
     logging: *logging
 
   backend:
+    image: dollma-backend
     build: ../backend
     restart: unless-stopped
     depends_on:
@@ -39,6 +40,9 @@ services:
       BACKEND_JWT_SECRET: ${BACKEND_JWT_SECRET:?run ./install.sh first}
       FRONTEND_ORIGIN: ${SITE_URL:?run ./install.sh first}
       OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
+      # content sent outside the private network only if allowed on purpose (docs/implantacao.md)
+      ALLOW_REMOTE_LLM: ${ALLOW_REMOTE_LLM:-}
+      ALLOW_REMOTE_DATABASE: ${ALLOW_REMOTE_DATABASE:-}
       LLM_MODEL: ${LLM_MODEL:-qwen3:8b}
       LLM_NUM_CTX: ${LLM_NUM_CTX:-8192}
       DEFAULT_LANGUAGE: ${DEFAULT_LANGUAGE:-pt}
@@ -53,6 +57,7 @@ services:
     logging: *logging
 
   frontend:
+    image: dollma-frontend
     build: ../frontend
     restart: unless-stopped
     depends_on:

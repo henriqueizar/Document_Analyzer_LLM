@@ -1,0 +1,56 @@
+# Added to ../docker-compose.yml by ../verify-egress.sh (a separate project:
+# it does not touch a real installation). Puts the connection monitor into the
+# backend and frontend, an LLM stand-in in place of Ollama, and a client that
+# plays the browser. Everything stays on the isolated network.
+services:
+  backend:
+    depends_on:
+      egress-init: { condition: service_completed_successfully }
+    environment:
+      NODE_OPTIONS: --require /monitor/egress-monitor.cjs
+      EGRESS_NAME: backend
+    volumes:
+      - ./verify-egress/egress-monitor.cjs:/monitor/egress-monitor.cjs:ro
+      - ./verify-egress/check.cjs:/monitor/check.cjs:ro
+      - egress:/egress
+
+  frontend:
+    depends_on:
+      egress-init: { condition: service_completed_successfully }
+    environment:
+      NODE_OPTIONS: --require /monitor/egress-monitor.cjs
+      EGRESS_NAME: frontend
+    volumes:
+      - ./verify-egress/egress-monitor.cjs:/monitor/egress-monitor.cjs:ro
+      - egress:/egress
+
+  ollama:
+    image: dollma-frontend   # any image with Node: no extra download
+    user: root
+    entrypoint: ["node", "/stub/llm-stub.cjs"]
+    volumes:
+      - ./verify-egress/llm-stub.cjs:/stub/llm-stub.cjs:ro
+
+  egress-init:
+    image: dollma-frontend
+    user: root
+    entrypoint: ["sh", "-c", "rm -f /egress/* && chmod 777 /egress"]
+    volumes:
+      - egress:/egress
+    networks: [private]
+
+  client:
+    profiles: [client]
+    image: dollma-frontend
+    user: root   # reads Caddy's root certificate, which only root may read
+    entrypoint: ["node", "/client/client.mjs"]
+    environment:
+      NODE_EXTRA_CA_CERTS: /caddy/caddy/pki/authorities/local/root.crt
+    volumes:
+      - ./verify-egress/client.mjs:/client/client.mjs:ro
+      - ../backend/test/fixtures:/fixtures:ro
+      - caddy_data:/caddy:ro
+    networks: [private]
+
+volumes:
+  egress:

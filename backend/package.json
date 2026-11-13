@@ -20,10 +20,10 @@
     "test:e2e": "node --experimental-vm-modules node_modules/jest/bin/jest.js --config ./test/jest-e2e.json --runInBand",
     "eval:llm": "ts-node --transpile-only scripts/eval-llm.ts",
     "verify:offline": "sh verify-offline/verify.sh",
-    "db:update": "prisma migrate deploy && prisma generate",
+    "db:update": "CHECKPOINT_DISABLE=1 prisma migrate deploy && CHECKPOINT_DISABLE=1 prisma generate",
     "prestart:dev": "npm run db:update",
     "prestart": "npm run db:update",
-    "prebuild": "prisma generate"
+    "prebuild": "CHECKPOINT_DISABLE=1 prisma generate"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",

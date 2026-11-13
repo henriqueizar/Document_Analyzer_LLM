@@ -101,6 +101,21 @@ Todos os comandos rodam dentro da pasta `deploy/`:
 A saúde detalhada (banco, LLM e modelo, fila, falhas e disco) fica no **Painel** do
 administrador.
 
+### Provar que nada sai da instalação
+
+`./verify-egress.sh` sobe uma instalação temporária separada (não mexe na sua), faz o que
+os usuários fazem e registra toda conexão que o aplicativo tenta. Falha se alguma for para
+fora da instalação. Detalhes em [privacidade-lgpd.md](privacidade-lgpd.md).
+
+### LLM em outro servidor
+
+Se a empresa tem um servidor com GPU separado, aponte `OLLAMA_URL` em `deploy/.env` para
+ele (por exemplo, `http://10.0.0.30:11434`). Endereços da rede privada são aceitos, com um
+aviso permanente no painel, porque o conteúdo dos documentos passa a trafegar pela rede.
+Endereços da internet, e modelos "cloud" do Ollama, fazem o backend **recusar iniciar**,
+a menos que `ALLOW_REMOTE_LLM=1` seja definido de propósito (o mesmo vale para o banco, com
+`ALLOW_REMOTE_DATABASE=1`).
+
 ### Backup
 
 `./backup.sh` salva o banco e os arquivos enviados em `deploy/backups/`. Duas

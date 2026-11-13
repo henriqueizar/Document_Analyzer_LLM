@@ -105,9 +105,18 @@ imagens Docker e o modelo). Três formas de verificar, sem precisar confiar no a
    Claude, ChatGPT ou DeepSeek junto com este repositório. Ele pede à IA que *procure*
    vazamentos, e não que confirme que não há nenhum.
 2. **Sem internet:** desligue o Wi-Fi e use o app normalmente.
-3. **Automática:** `npm run verify:offline` (no `backend`) roda o fluxo completo num
-   contêiner Docker sem rota para a internet, depois de provar que o contêiner não alcança
-   nenhum host externo.
+3. **Medida:** `cd deploy && ./verify-egress.sh` sobe uma instalação de produção
+   temporária, faz o que os usuários fazem (login, upload com OCR, perguntas, todas as
+   páginas, por HTTPS) e registra **toda conexão que o aplicativo tenta**, inclusive as que
+   falhariam em silêncio. Falha se alguma for para fora da instalação, e uma tentativa de
+   controle feita de propósito prova que o registro está funcionando.
+
+Além disso, o backend **recusa iniciar** se a LLM ou o banco estiverem configurados para
+um endereço da internet (ou um modelo "cloud" do Ollama), a menos que isso seja permitido
+explicitamente. O aplicativo também desliga a tradução automática e o corretor ortográfico
+do navegador, que mandariam o texto da tela para a nuvem. Ele não tem como bloquear os
+recursos de IA do próprio navegador (como "Perguntar ao Google sobre esta página").
+Detalhes em [`docs/privacidade-lgpd.md`](docs/privacidade-lgpd.md).
 
 O inventário de dados pessoais (o que é guardado, onde e quem acessa) está em
 [`docs/privacidade-lgpd.md`](docs/privacidade-lgpd.md). É uma descrição técnica, não um
