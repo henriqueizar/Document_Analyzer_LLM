@@ -1,11 +1,16 @@
 # Ollama running on this machine outside Docker (the native app on a Mac, which
-# uses the Apple GPU). Chosen by ./install.sh. The backend then needs a route to
-# the host, so it also joins the normal network: the database and the frontend
-# stay without internet access, the backend no longer is.
+# uses the Apple GPU). Chosen by ./install.sh.
+#
+# The backend keeps no route to the internet: it reaches Ollama through the
+# proxy, which forwards only to host.docker.internal:11434 (Caddyfile.native-ollama).
 services:
   backend:
     environment:
-      OLLAMA_URL: http://host.docker.internal:11434
+      OLLAMA_URL: http://proxy:11434
+
+  proxy:
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    networks: [private, public]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile.base:ro
+      - ./Caddyfile.native-ollama:/etc/caddy/Caddyfile:ro

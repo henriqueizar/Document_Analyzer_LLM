@@ -70,15 +70,15 @@ distribuir isso por política de grupo ou MDM.
 | --- | --- | --- |
 | `proxy` (Caddy) | Única entrada, portas 80 e 443. `/` vai para a interface e `/backend` vai para a API | Só publica as portas para a rede local |
 | `frontend` (Next.js, modo produção) | Rede interna | **Nenhuma rota** |
-| `backend` (NestJS) | Rede interna | **Nenhuma rota**, exceto no modo `native` (veja abaixo) |
+| `backend` (NestJS) | Rede interna | **Nenhuma rota** |
 | `db` (PostgreSQL) | Rede interna | **Nenhuma rota** |
 | `ollama` (modos `gpu` e `cpu`) | Rede interna | **Nenhuma rota**: o modelo é baixado durante a instalação |
 
 A rede interna é uma rede Docker `internal`: os containers nela não têm como alcançar a
 internet, mesmo que algum código tentasse. Assim, o "nada sai da máquina" é garantido pela
-infraestrutura, além do código. No modo `native` (Mac), o backend precisa alcançar o
-Ollama fora do Docker e por isso também fica na rede comum; banco e interface continuam
-isolados.
+infraestrutura, além do código. No modo `native` (Mac), o Ollama roda fora do Docker: o
+backend continua sem rota para a internet e fala com o proxy, que repassa **somente** para
+o Ollama desta máquina (`Caddyfile.native-ollama`).
 
 Tudo reinicia sozinho se um processo travar ou se a máquina reiniciar
 (`restart: unless-stopped`), e o Docker confere a saúde do backend a cada 10 segundos.

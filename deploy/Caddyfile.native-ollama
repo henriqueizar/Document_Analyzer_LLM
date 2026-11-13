@@ -1,0 +1,13 @@
+# Used instead of Caddyfile when Ollama runs on this machine outside Docker
+# (native mode, e.g. on a Mac). Everything in Caddyfile, plus a gateway on the
+# internal network that forwards ONLY to that Ollama. The backend talks to this
+# gateway and keeps no route to the internet.
+import /etc/caddy/Caddyfile.base
+
+# Not published to the host: reachable only from the internal Docker network.
+http://:11434 {
+	reverse_proxy host.docker.internal:11434 {
+		# the same Host header Ollama sees when called from the host directly
+		header_up Host host.docker.internal:11434
+	}
+}
