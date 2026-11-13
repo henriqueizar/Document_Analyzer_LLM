@@ -25,6 +25,14 @@ ask() { # ask <variable> <question> <default>
   read -r -p "$2 [$3]: " answer
   printf -v "$1" '%s' "${answer:-$3}"
 }
+resolves() { # can this machine find the address? (IP, localhost, DNS or /etc/hosts)
+  local name="$1"
+  [ "$name" = localhost ] && return 0
+  [[ "$name" =~ ^[0-9]+(\.[0-9]+){3}$ ]] && return 0
+  if command -v getent >/dev/null 2>&1; then getent hosts "$name" >/dev/null 2>&1 && return 0; fi
+  if command -v dscacheutil >/dev/null 2>&1; then dscacheutil -q host -a name "$name" | grep -q ip_address && return 0; fi
+  return 1
+}
 secret() { # 48 hex characters: safe in URLs and .env files
   if command -v openssl >/dev/null 2>&1; then openssl rand -hex 24
   else od -An -tx1 -N24 /dev/urandom | tr -d ' \n'; fi
@@ -42,7 +50,22 @@ if [ -f .env ]; then
 fi
 
 say "Instalação do Document LLM Analyzer"
-ask DOLLMA_ADDRESS "Endereço pelo qual as pessoas vão acessar (nome ou IP deste servidor)" "localhost"
+echo
+echo "Endereço de acesso: o que as pessoas vão digitar no navegador para abrir o app."
+echo "  - Só nesta máquina: localhost"
+echo "  - Na rede da empresa: o nome do servidor na rede (ex.: documentos.empresa.local)"
+echo "    ou o IP dele (ex.: 192.168.0.20). Não é um nome para a instalação: precisa existir na rede."
+while true; do
+  ask DOLLMA_ADDRESS "Endereço de acesso" "localhost"
+  candidate="${DOLLMA_ADDRESS#https://}"; candidate="${candidate#http://}"; candidate="${candidate%%/*}"; candidate="${candidate%%:*}"
+  if resolves "$candidate"; then break; fi
+  echo "Aviso: \"$candidate\" não foi encontrado nesta máquina (nenhum DNS ou /etc/hosts o conhece)."
+  echo "Os navegadores também não vão encontrá-lo, e o HTTPS só vale para este endereço."
+  if [ ! -t 0 ]; then fail "endereço não encontrado: $candidate"; fi
+  read -r -p "Usar mesmo assim? (s/N): " keep
+  case "$keep" in s|S|sim|SIM) break ;; esac
+  DOLLMA_ADDRESS=""
+done
 echo
 echo "Onde a LLM (Ollama) vai rodar?"
 echo "  gpu    - no Docker, com GPU NVIDIA (servidor Linux; recomendado para empresas)"
